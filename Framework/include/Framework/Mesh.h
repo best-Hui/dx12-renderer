@@ -150,6 +150,8 @@ public:
     void Bind(CommandList& commandList) const;
 
     UINT GetIndexCount() const;
+    const VertexBuffer& GetVertexBuffer() const;
+    const IndexBuffer& GetIndexBuffer() const;
 
     static std::shared_ptr<Mesh> CreateCube(CommandList& commandList, float size = 1, bool rhCoords = false);
     static std::shared_ptr<Mesh> CreateSphere(CommandList& commandList, float diameter = 1, size_t tessellation = 16,

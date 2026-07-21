@@ -16,6 +16,7 @@ project(LearningDirectX12 LANGUAGES CXX)
 add_subdirectory(DX12Library)
 add_subdirectory(Framework)
 add_subdirectory(RenderGraph)
+add_subdirectory(DXR)
 
 # Demos
 add_subdirectory(Demos/AnimationsDemo)
@@ -25,6 +26,7 @@ add_subdirectory(Demos/ToonDemo)
 add_subdirectory(Demos/GrassDemo)
 add_subdirectory(Demos/RenderGraphDemo)
 add_subdirectory(Demos/MeshletsDemo)
+add_subdirectory(Demos/RaytracingDemo)
 
 # Set the startup project.
 set_directory_properties(PROPERTIES

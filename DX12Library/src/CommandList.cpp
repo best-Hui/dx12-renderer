@@ -1056,6 +1056,24 @@ void CommandList::Dispatch(const uint32_t numGroupsX, const uint32_t numGroupsY,
     m_D3d12CommandList->Dispatch(numGroupsX, numGroupsY, numGroupsZ);
 }
 
+void CommandList::SetRaytracingPipelineState(const ComPtr<ID3D12StateObject>& stateObject)
+{
+    m_D3d12CommandList5->SetPipelineState1(stateObject.Get());
+    TrackObject(stateObject);
+}
+
+void CommandList::DispatchRays(const D3D12_DISPATCH_RAYS_DESC& dispatchRaysDesc)
+{
+    FlushResourceBarriers();
+    m_D3d12CommandList5->DispatchRays(&dispatchRaysDesc);
+}
+
+void CommandList::BuildRaytracingAccelerationStructure(const D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC& buildDesc)
+{
+    FlushResourceBarriers();
+    m_D3d12CommandList5->BuildRaytracingAccelerationStructure(&buildDesc, 0, nullptr);
+}
+
 bool CommandList::Close(CommandList& pendingCommandList)
 {
     // Flush any remaining barriers.
@@ -1225,6 +1243,21 @@ void CommandList::SetComputeRootUnorderedAccessView(UINT rootParameterIndex, con
 
     m_D3d12CommandList->SetComputeRootUnorderedAccessView(rootParameterIndex, d3d12Resource->GetGPUVirtualAddress());
     TrackObject(d3d12Resource);
+}
+
+void CommandList::SetComputeRootShaderResourceView(UINT rootParameterIndex, D3D12_GPU_VIRTUAL_ADDRESS gpuAddress)
+{
+    m_D3d12CommandList->SetComputeRootShaderResourceView(rootParameterIndex, gpuAddress);
+}
+
+void CommandList::SetComputeRootConstantBufferView(UINT rootParameterIndex, D3D12_GPU_VIRTUAL_ADDRESS gpuAddress)
+{
+    m_D3d12CommandList->SetComputeRootConstantBufferView(rootParameterIndex, gpuAddress);
+}
+
+void CommandList::SetComputeRootDescriptorTable(UINT rootParameterIndex, D3D12_GPU_DESCRIPTOR_HANDLE descriptorHandle)
+{
+    m_D3d12CommandList->SetComputeRootDescriptorTable(rootParameterIndex, descriptorHandle);
 }
 
 void CommandList::SetAutomaticViewportAndScissorRect(const RenderTarget& renderTarget, const UINT mipLevel)

@@ -220,6 +220,16 @@ UINT Mesh::GetIndexCount() const
     return m_IndexCount;
 }
 
+const VertexBuffer& Mesh::GetVertexBuffer() const
+{
+    return m_VertexBuffer;
+}
+
+const IndexBuffer& Mesh::GetIndexBuffer() const
+{
+    return m_IndexBuffer;
+}
+
 std::shared_ptr<Mesh> Mesh::CreateSphere(CommandList& commandList, float diameter, size_t tessellation, bool rhcoords)
 {
     VertexCollectionType vertices;

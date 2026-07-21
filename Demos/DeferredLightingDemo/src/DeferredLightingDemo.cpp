@@ -268,12 +268,14 @@ DeferredLightingDemo::DeferredLightingDemo(const std::wstring& name,
     int width,
     int height,
     GraphicsSettings graphicsSettings)
-    : Base(name, width, height, graphicsSettings.VSync),
+    : Base(name, width, height, false),
     m_GraphicsSettings(graphicsSettings),
     m_CameraController{},
     m_Width(0),
     m_Height(0)
 {
+    m_GraphicsSettings.VSync = false;
+
     const XMVECTOR cameraPos = XMVectorSet(0, 5, -20, 1);
     const XMVECTOR cameraTarget = XMVectorSet(0, 5, 0, 1);
     const XMVECTOR cameraUp = XMVectorSet(0, 1, 0, 0);
@@ -1001,6 +1003,10 @@ void DeferredLightingDemo::OnUpdate(UpdateEventArgs& e)
         sprintf_s(buffer, "FPS: %f\n", fps);
         OutputDebugStringA(buffer);
 
+        wchar_t title[512];
+        swprintf_s(title, L"%s - FPS: %.2f", PWindow->GetWindowName().c_str(), fps);
+        SetWindowTextW(PWindow->GetWindowHandle(), title);
+
         frameCount = 0;
         totalTime = 0.0;
     }
@@ -1447,8 +1453,9 @@ void DeferredLightingDemo::OnKeyPressed(KeyEventArgs& e)
         break;
         }
     case KeyCode::V:
-        PWindow->ToggleVSync();
-        m_GraphicsSettings.VSync = !m_GraphicsSettings.VSync;
+        PWindow->SetVSync(false);
+        m_GraphicsSettings.VSync = false;
+        OutputDebugStringA("VSync: Forced Off\n");
         break;
     case KeyCode::R:
         // Reset camera transform

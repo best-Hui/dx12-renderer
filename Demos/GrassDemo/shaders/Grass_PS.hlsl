@@ -16,5 +16,6 @@ Targets main(Varyings IN)
     Targets OUT;
     OUT.Color = lerp(_Colors[_Index], 0, IN.UV.y);
     OUT.Velocity.xy = CalculateVelocity(IN.CurrentPositionCS, IN.PreviousPositionCS);
+    OUT.Velocity.zw = float2(0, 0);
     return OUT;
 }

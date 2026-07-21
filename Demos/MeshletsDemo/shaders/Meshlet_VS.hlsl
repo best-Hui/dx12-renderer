@@ -18,7 +18,7 @@ uint LoadIndex(const in Meshlet meshlet, uint vertexId)
     const uint index = _CommonIndexBuffer.Load<uint>(address);
     // the remainder is either 0 or 2
     const uint shift = remainder * 8;
-    const uint mask = 0xFFFF << shift;
+    const uint mask = 0xFFFFu << shift;
     return (index & mask) >> shift;
 }
 

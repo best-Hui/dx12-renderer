@@ -86,6 +86,11 @@ public:
         return m_D3d12CommandList;
     }
 
+    Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList5> GetGraphicsCommandList5() const
+    {
+        return m_D3d12CommandList5;
+    }
+
     /**
      * Transition a resource to a particular state.
      *
@@ -432,6 +437,10 @@ public:
      */
     void Dispatch(uint32_t numGroupsX, uint32_t numGroupsY = 1, uint32_t numGroupsZ = 1);
 
+    void SetRaytracingPipelineState(const Microsoft::WRL::ComPtr<ID3D12StateObject>& stateObject);
+    void DispatchRays(const D3D12_DISPATCH_RAYS_DESC& dispatchRaysDesc);
+    void BuildRaytracingAccelerationStructure(const D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC& buildDesc);
+
     /***************************************************************************
      * Methods defined below are only intended to be used by internal classes. *
      ***************************************************************************/
@@ -473,6 +482,9 @@ public:
     }
 
     void SetComputeRootUnorderedAccessView(UINT rootParameterIndex, const Resource& resource);
+    void SetComputeRootShaderResourceView(UINT rootParameterIndex, D3D12_GPU_VIRTUAL_ADDRESS gpuAddress);
+    void SetComputeRootConstantBufferView(UINT rootParameterIndex, D3D12_GPU_VIRTUAL_ADDRESS gpuAddress);
+    void SetComputeRootDescriptorTable(UINT rootParameterIndex, D3D12_GPU_DESCRIPTOR_HANDLE descriptorHandle);
 
     void SetAutomaticViewportAndScissorRect(const RenderTarget& renderTarget, UINT mipLevel = 0);
     void SetInfiniteScrissorRect();
