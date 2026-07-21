@@ -94,6 +94,10 @@ public:
     void SetConstantBufferData(std::string_view name, const void* data, size_t size);
     void SetStructuredBuffer(std::string_view name, const StructuredBuffer& buffer);
     void SetTextureArray(std::string_view name, const std::vector<std::shared_ptr<Texture>>& textures);
+    void SetTextureArray(
+        std::string_view name,
+        const std::vector<std::shared_ptr<Texture>>& textures,
+        const std::vector<D3D12_SHADER_RESOURCE_VIEW_DESC>& srvDescs);
 
     void Dispatch(CommandList& commandList, std::string_view passName, uint32_t width, uint32_t height, uint32_t depth = 1);
 

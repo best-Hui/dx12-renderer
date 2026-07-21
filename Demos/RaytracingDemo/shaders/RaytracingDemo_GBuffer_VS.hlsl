@@ -1,0 +1,49 @@
+#include <ShaderLibrary/Common/RootSignature.hlsli>
+
+cbuffer PipelineCBuffer : register(b0, COMMON_ROOT_SIGNATURE_PIPELINE_SPACE)
+{
+    matrix g_Pipeline_View;
+    matrix g_Pipeline_Projection;
+    matrix g_Pipeline_ViewProjection;
+    float4 g_Pipeline_CameraPosition;
+    matrix g_Pipeline_InverseView;
+    matrix g_Pipeline_InverseProjection;
+    float2 g_Pipeline_ScreenResolution;
+    float2 g_Pipeline_ScreenTexelSize;
+};
+
+cbuffer ModelCBuffer : register(b0, COMMON_ROOT_SIGNATURE_MODEL_SPACE)
+{
+    matrix g_Model_Model;
+    matrix g_Model_ModelViewProjection;
+    matrix g_Model_InverseTransposeModel;
+    matrix g_Model_Padding;
+};
+
+struct VertexAttributes
+{
+    float3 PositionOs : POSITION;
+    float3 NormalOs : NORMAL;
+    float2 Uv : TEXCOORD;
+    float3 TangentOs : TANGENT;
+    float3 BitangentOs : BINORMAL;
+};
+
+struct VertexShaderOutput
+{
+    float3 PositionWs : POSITION_WS;
+    float3 NormalWs : NORMAL;
+    float2 Uv : TEXCOORD0;
+    float4 PositionCs : SV_POSITION;
+};
+
+VertexShaderOutput main(VertexAttributes IN)
+{
+    VertexShaderOutput OUT;
+    const float4 positionWs = mul(g_Model_Model, float4(IN.PositionOs, 1.0f));
+    OUT.PositionWs = positionWs.xyz;
+    OUT.NormalWs = normalize(mul((float3x3)g_Model_InverseTransposeModel, IN.NormalOs));
+    OUT.Uv = IN.Uv;
+    OUT.PositionCs = mul(g_Model_ModelViewProjection, float4(IN.PositionOs, 1.0f));
+    return OUT;
+}

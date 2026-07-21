@@ -346,10 +346,12 @@ struct RayTracingShader::Impl
                 {
                     if (i < boundBinding.TextureResources.size())
                     {
+                        const D3D12_SHADER_RESOURCE_VIEW_DESC* srvDesc =
+                            i < boundBinding.TextureSrvDescs.size() ? &boundBinding.TextureSrvDescs[i] : nullptr;
                         device->CopyDescriptorsSimple(
                             1,
                             DescriptorAllocation.GetDescriptorHandle(descriptorOffset + i),
-                            boundBinding.TextureResources[i]->GetShaderResourceView(),
+                            boundBinding.TextureResources[i]->GetShaderResourceView(srvDesc),
                             D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
                     }
                     else
@@ -402,6 +404,7 @@ struct RayTracingShader::Impl
     {
         std::shared_ptr<Texture> TextureResource;
         std::vector<std::shared_ptr<Texture>> TextureResources;
+        std::vector<D3D12_SHADER_RESOURCE_VIEW_DESC> TextureSrvDescs;
         const StructuredBuffer* Buffer = nullptr;
         std::vector<uint8_t> ConstantBufferData;
     };
@@ -525,7 +528,24 @@ void RayTracingShader::SetTextureArray(std::string_view name, const std::vector<
     const RayTracingShaderBindingDesc& binding = m_Impl->GetBinding(name, RayTracingShaderBindingType::TextureArray);
     Assert(!textures.empty(), "Ray tracing texture array must not be empty.");
     Assert(textures.size() <= binding.DescriptorCount, "Ray tracing texture array exceeds binding descriptor count.");
-    m_Impl->BoundBindings[m_Impl->GetBindingIndex(binding)].TextureResources = textures;
+    auto& boundBinding = m_Impl->BoundBindings[m_Impl->GetBindingIndex(binding)];
+    boundBinding.TextureResources = textures;
+    boundBinding.TextureSrvDescs.clear();
+    m_Impl->MarkDescriptorsDirty(binding);
+}
+
+void RayTracingShader::SetTextureArray(
+    std::string_view name,
+    const std::vector<std::shared_ptr<Texture>>& textures,
+    const std::vector<D3D12_SHADER_RESOURCE_VIEW_DESC>& srvDescs)
+{
+    const RayTracingShaderBindingDesc& binding = m_Impl->GetBinding(name, RayTracingShaderBindingType::TextureArray);
+    Assert(!textures.empty(), "Ray tracing texture array must not be empty.");
+    Assert(textures.size() <= binding.DescriptorCount, "Ray tracing texture array exceeds binding descriptor count.");
+    Assert(srvDescs.size() == textures.size(), "Ray tracing texture SRV desc count must match the texture count.");
+    auto& boundBinding = m_Impl->BoundBindings[m_Impl->GetBindingIndex(binding)];
+    boundBinding.TextureResources = textures;
+    boundBinding.TextureSrvDescs = srvDescs;
     m_Impl->MarkDescriptorsDirty(binding);
 }
 
@@ -557,20 +577,29 @@ void RayTracingShader::Dispatch(
         if (binding.Type == RayTracingShaderBindingType::OutputTexture)
         {
             Assert(boundBinding != nullptr && boundBinding->TextureResource != nullptr, "Ray tracing output texture is not bound.");
-            commandList.TransitionBarrier(*boundBinding->TextureResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+            if (boundBinding->TextureResource->AreAutoBarriersEnabled())
+            {
+                commandList.TransitionBarrier(*boundBinding->TextureResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+            }
         }
         else if (binding.Type == RayTracingShaderBindingType::TextureArray)
         {
             Assert(boundBinding != nullptr, "Ray tracing texture array is not bound.");
             for (const auto& texture : boundBinding->TextureResources)
             {
-                commandList.TransitionBarrier(*texture, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                if (texture->AreAutoBarriersEnabled())
+                {
+                    commandList.TransitionBarrier(*texture, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                }
             }
         }
         else if (binding.Type == RayTracingShaderBindingType::StructuredBuffer)
         {
             Assert(boundBinding != nullptr && boundBinding->Buffer != nullptr, "Ray tracing structured buffer is not bound.");
-            commandList.TransitionBarrier(*boundBinding->Buffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            if (boundBinding->Buffer->AreAutoBarriersEnabled())
+            {
+                commandList.TransitionBarrier(*boundBinding->Buffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            }
         }
     }
 

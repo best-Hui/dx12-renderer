@@ -10,14 +10,20 @@
 #include <Framework/GraphicsSettings.h>
 #include <Framework/Mesh.h>
 #include <Framework/ModelLoader.h>
+#include <Framework/PipelineStateBuilder.h>
 #include <Framework/ShaderBlob.h>
+
+#include <RenderGraph/RenderMetadata.h>
 
 #include <DirectXMath.h>
 #include <d3dx12.h>
+#include <imgui.h>
 
 #include <algorithm>
 #include <cmath>
 #include <vector>
+
+#include "RenderGraph.User.h"
 
 #if defined(min)
 #undef min
@@ -62,25 +68,42 @@ bool RaytracingDemo::LoadContent()
     const auto commandQueue = Application::Get().GetCommandQueue();
     const auto commandList = commandQueue->GetCommandList();
 
-    m_RayTracingShader = std::make_unique<RayTracingShader>(ShaderBlob(L"RaytracingDemo_RT.cso"));
-    ResizeRayTracingOutputTexture();
-
     LoadDeferredLightingScene(*commandList);
+
+    m_SkyboxTexture = std::make_shared<Texture>();
+    commandList->LoadTextureFromFile(*m_SkyboxTexture, L"Assets/Textures/skybox/skybox.dds", TextureUsageType::Albedo);
 
     Assert(!m_Textures.empty(), "RaytracingDemo needs at least one texture before creating the common root signature.");
     m_RootSignature = std::make_shared<CommonRootSignature>(m_Textures.front());
-    m_Taa = std::make_unique<TAA>(m_RootSignature, *commandList, Window::BUFFER_FORMAT, m_Width, m_Height);
+    m_ImGui = std::make_unique<ImGuiImpl>(*commandList, *PWindow, m_RootSignature);
 
-    const auto velocityDesc = CD3DX12_RESOURCE_DESC::Tex2D(
-        DXGI_FORMAT_R16G16_FLOAT,
-        m_Width,
-        m_Height,
-        1,
-        1,
-        1,
-        0,
-        D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET);
-    m_TaaVelocityTexture = std::make_shared<Texture>(velocityDesc, nullptr, TextureUsageType::RenderTarget, L"Ray Tracing TAA Zero Velocity");
+    m_SkyboxMesh = Mesh::CreateCube(*commandList);
+
+    m_GBufferShader = std::make_shared<Shader>(
+        m_RootSignature,
+        ShaderBlob(L"RaytracingDemo_GBuffer_VS.cso"),
+        ShaderBlob(L"RaytracingDemo_GBuffer_PS.cso"));
+
+    m_SkyboxShader = std::make_shared<Shader>(
+        m_RootSignature,
+        ShaderBlob(L"RaytracingDemo_Skybox_VS.cso"),
+        ShaderBlob(L"RaytracingDemo_Skybox_PS.cso"),
+        [](PipelineStateBuilder& builder)
+        {
+            auto rasterizer = CD3DX12_RASTERIZER_DESC(D3D12_FILL_MODE_SOLID, D3D12_CULL_MODE_FRONT, FALSE, 0, 0,
+                0, TRUE, FALSE, FALSE, 0, D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF);
+            auto depthStencil = CD3DX12_DEPTH_STENCIL_DESC(CD3DX12_DEFAULT());
+            depthStencil.DepthEnable = true;
+            depthStencil.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+
+            builder.WithRasterizer(rasterizer).WithDepthStencil(depthStencil);
+        });
+
+    RayTracingPipelineDesc rayTracingDesc = RayTracingShader::CreateDefaultPipelineDesc();
+    rayTracingDesc.Bindings.push_back({ "GBufferTextures", RayTracingShaderBindingType::TextureArray, 0, 4, 4 });
+    rayTracingDesc.Bindings.push_back({ "Skybox", RayTracingShaderBindingType::TextureArray, 0, 5, 1 });
+    rayTracingDesc.Bindings.push_back({ "Accumulation", RayTracingShaderBindingType::OutputTexture, 1, 0, 1 });
+    m_RayTracingShader = std::make_unique<RayTracingShader>(ShaderBlob(L"RaytracingDemo_RT.cso"), rayTracingDesc);
 
     AddRaytracingInstances();
 
@@ -89,12 +112,9 @@ bool RaytracingDemo::LoadContent()
     m_RayTracingAccelerationStructure.Build(*commandList, accelerationStructureSettings);
     commandList->CopyStructuredBuffer(m_MaterialBuffer, m_Materials);
     commandList->CopyStructuredBuffer(m_GeometryBuffer, m_RayTracingAccelerationStructure.GetGeometryData());
+    BindRayTracingShaderResources();
 
-    m_RayTracingShader->SetOutputTexture("Output", m_RayTracingOutputTexture);
-    m_RayTracingShader->SetAccelerationStructure("Scene", m_RayTracingAccelerationStructure);
-    m_RayTracingShader->SetStructuredBuffer("Materials", m_MaterialBuffer);
-    m_RayTracingShader->SetStructuredBuffer("Geometries", m_GeometryBuffer);
-    m_RayTracingShader->SetTextureArray("Textures", m_Textures);
+    m_RenderGraph = RenderGraph::User::Create(*this, *commandList);
 
     const uint64_t fenceValue = commandQueue->ExecuteCommandList(commandList);
     commandQueue->WaitForFenceValue(fenceValue);
@@ -103,44 +123,108 @@ bool RaytracingDemo::LoadContent()
 
 void RaytracingDemo::UnloadContent()
 {
-    m_TaaVelocityTexture.reset();
-    m_Taa.reset();
+    m_RenderGraph.reset();
+    m_SkyboxShader.reset();
+    m_GBufferShader.reset();
+    m_SkyboxMesh.reset();
+    m_ImGui.reset();
     m_RootSignature.reset();
-    m_RayTracingOutputTexture.reset();
+    m_SkyboxTexture.reset();
     m_RayTracingShader.reset();
     m_SceneObjects.clear();
     m_Materials.clear();
     m_Textures.clear();
 }
 
-void RaytracingDemo::ResizeRayTracingOutputTexture()
+void RaytracingDemo::BindRayTracingShaderResources()
 {
-    const auto width = static_cast<uint32_t>(std::max(1, m_Width));
-    const auto height = static_cast<uint32_t>(std::max(1, m_Height));
+    m_RayTracingShader->SetAccelerationStructure("Scene", m_RayTracingAccelerationStructure);
+    m_RayTracingShader->SetStructuredBuffer("Materials", m_MaterialBuffer);
+    m_RayTracingShader->SetStructuredBuffer("Geometries", m_GeometryBuffer);
+    m_RayTracingShader->SetTextureArray("Textures", m_Textures);
 
-    if (m_RayTracingOutputTexture == nullptr)
-    {
-        const auto outputDesc = CD3DX12_RESOURCE_DESC::Tex2D(
-            DXGI_FORMAT_R8G8B8A8_UNORM,
-            width,
-            height,
-            1,
-            1,
-            1,
-            0,
-            D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+    D3D12_SHADER_RESOURCE_VIEW_DESC skyboxSrvDesc = {};
+    skyboxSrvDesc.Format = m_SkyboxTexture->GetD3D12ResourceDesc().Format;
+    skyboxSrvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    skyboxSrvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
+    skyboxSrvDesc.TextureCube.MipLevels = 1;
+    skyboxSrvDesc.TextureCube.MostDetailedMip = 0;
+    skyboxSrvDesc.TextureCube.ResourceMinLODClamp = 0.0f;
+    m_RayTracingShader->SetTextureArray("Skybox", { m_SkyboxTexture }, { skyboxSrvDesc });
+}
 
-        m_RayTracingOutputTexture = std::make_shared<Texture>(outputDesc, nullptr, TextureUsageType::Other, L"Ray Tracing Output");
-    }
-    else
+RaytracingDemo::CameraConstants RaytracingDemo::BuildCameraConstants() const
+{
+    CameraConstants camera{};
+    camera.InverseView = XMMatrixInverse(nullptr, m_Camera.GetViewMatrix());
+    camera.InverseProjection = XMMatrixInverse(nullptr, m_Camera.GetProjectionMatrix());
+    XMStoreFloat4(&camera.CameraPosition, m_Camera.GetTranslation());
+    camera.Width = static_cast<uint32_t>(m_Width);
+    camera.Height = static_cast<uint32_t>(m_Height);
+    camera.MaxBounces = static_cast<uint32_t>(Clamp(m_MaxBounces, 0, 5));
+    camera.SamplesPerPixel = 1;
+    camera.LightCount = static_cast<uint32_t>(std::min<size_t>(m_PointLights.size(), MaxPathTracingLights));
+    camera.FrameIndex = m_FrameIndex;
+    camera.AccumulationFrameIndex = m_AccumulationFrameIndex;
+
+    for (uint32_t i = 0; i < camera.LightCount; ++i)
     {
-        m_RayTracingOutputTexture->Resize(width, height);
+        const PointLight& pointLight = m_PointLights[i];
+        camera.Lights[i].PositionAndRange = {
+            pointLight.PositionWs.x,
+            pointLight.PositionWs.y,
+            pointLight.PositionWs.z,
+            pointLight.Range
+        };
+        camera.Lights[i].ColorAndIntensity = {
+            pointLight.Color.x,
+            pointLight.Color.y,
+            pointLight.Color.z,
+            20.0f
+        };
+        camera.Lights[i].Attenuation = {
+            pointLight.ConstantAttenuation,
+            pointLight.LinearAttenuation,
+            pointLight.QuadraticAttenuation,
+            0.0f
+        };
     }
 
-    if (m_RayTracingShader != nullptr)
+    return camera;
+}
+
+RaytracingDemo::PipelineConstants RaytracingDemo::BuildPipelineConstants() const
+{
+    PipelineConstants pipeline{};
+    pipeline.View = m_Camera.GetViewMatrix();
+    pipeline.Projection = m_Camera.GetProjectionMatrix();
+    pipeline.ViewProjection = pipeline.View * pipeline.Projection;
+    XMStoreFloat4(&pipeline.CameraPosition, m_Camera.GetTranslation());
+    pipeline.InverseView = XMMatrixInverse(nullptr, pipeline.View);
+    pipeline.InverseProjection = XMMatrixInverse(nullptr, pipeline.Projection);
+    pipeline.ScreenResolution = { static_cast<float>(m_Width), static_cast<float>(m_Height) };
+    pipeline.ScreenTexelSize = { 1.0f / pipeline.ScreenResolution.x, 1.0f / pipeline.ScreenResolution.y };
+    return pipeline;
+}
+
+void RaytracingDemo::ResetAccumulation()
+{
+    m_AccumulationFrameIndex = 0;
+}
+
+void RaytracingDemo::OnImGui()
+{
+    ImGui::Begin("Raytracing");
+    ImGui::Text("DXR GBuffer Path Tracing");
+    ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
+    ImGui::Text("Resolution: %d x %d", m_Width, m_Height);
+    ImGui::Text("Frame: %u", m_FrameIndex);
+    ImGui::Text("Accumulation: %u", m_AccumulationFrameIndex);
+    if (ImGui::SliderInt("Bounces", &m_MaxBounces, 0, 5))
     {
-        m_RayTracingShader->SetOutputTexture("Output", m_RayTracingOutputTexture);
+        ResetAccumulation();
     }
+    ImGui::End();
 }
 
 uint32_t RaytracingDemo::AddTexture(CommandList& commandList, const std::wstring& path, TextureUsageType usage)
@@ -160,12 +244,17 @@ uint32_t RaytracingDemo::AddMaterial(const MaterialData& material)
 uint32_t RaytracingDemo::AddDiffuseMaterial(
     const XMFLOAT4& diffuse,
     const XMFLOAT4& tilingOffset,
-    const uint32_t diffuseTextureIndex)
+    const uint32_t diffuseTextureIndex,
+    const float metallic,
+    const float roughness)
 {
     MaterialData material{};
     material.Diffuse = diffuse;
+    material.Specular = { 0.04f, 0.04f, 0.04f, 1.0f };
     material.TilingOffset = tilingOffset;
     material.DiffuseTextureIndex = diffuseTextureIndex;
+    material.Metallic = metallic;
+    material.Roughness = roughness;
     return AddMaterial(material);
 }
 
@@ -180,12 +269,12 @@ void RaytracingDemo::LoadDeferredLightingScene(CommandList& commandList)
     const uint32_t cerberusTexture = AddTexture(commandList, L"Assets/Models/cerberus/Cerberus_A.jpg");
     const uint32_t tvTexture = AddTexture(commandList, L"Assets/Models/tv/TV_Color.jpg");
 
-    const uint32_t groundMaterial = AddDiffuseMaterial({ 1, 1, 1, 1 }, { 6, 6, 0, 0 }, groundTexture);
-    const uint32_t chestMaterial = AddDiffuseMaterial({ 1, 1, 1, 1 }, { 1, 1, 0, 0 }, chestTexture);
-    const uint32_t mirrorMaterial = AddDiffuseMaterial({ 0.85f, 0.85f, 0.92f, 1 }, { 1, 1, 0, 0 }, whiteTexture);
-    const uint32_t cubeMaterial = AddDiffuseMaterial({ 0.9f, 0.9f, 0.9f, 1 }, { 1, 1, 0, 0 }, whiteTexture);
-    const uint32_t cerberusMaterial = AddDiffuseMaterial({ 1, 1, 1, 1 }, { 1, 1, 0, 0 }, cerberusTexture);
-    const uint32_t tvMaterial = AddDiffuseMaterial({ 1, 1, 1, 1 }, { 1, 1, 0, 0 }, tvTexture);
+    const uint32_t groundMaterial = AddDiffuseMaterial({ 1, 1, 1, 1 }, { 6, 6, 0, 0 }, groundTexture, 0.0f, 0.85f);
+    const uint32_t chestMaterial = AddDiffuseMaterial({ 1, 1, 1, 1 }, { 1, 1, 0, 0 }, chestTexture, 0.0f, 0.55f);
+    const uint32_t mirrorMaterial = AddDiffuseMaterial({ 0.85f, 0.85f, 0.92f, 1 }, { 1, 1, 0, 0 }, whiteTexture, 1.0f, 0.08f);
+    const uint32_t cubeMaterial = AddDiffuseMaterial({ 0.9f, 0.9f, 0.9f, 1 }, { 1, 1, 0, 0 }, whiteTexture, 0.0f, 0.35f);
+    const uint32_t cerberusMaterial = AddDiffuseMaterial({ 1, 1, 1, 1 }, { 1, 1, 0, 0 }, cerberusTexture, 0.0f, 0.45f);
+    const uint32_t tvMaterial = AddDiffuseMaterial({ 1, 1, 1, 1 }, { 1, 1, 0, 0 }, tvTexture, 0.2f, 0.35f);
 
     {
         auto model = modelLoader.LoadExisting(Mesh::CreatePlane(commandList));
@@ -253,7 +342,7 @@ void RaytracingDemo::LoadDeferredLightingScene(CommandList& commandList)
                 1.0f
             };
 
-            const uint32_t material = AddDiffuseMaterial(color, { 1, 1, 0, 0 }, whiteTexture);
+            const uint32_t material = AddDiffuseMaterial(color, { 1, 1, 0, 0 }, whiteTexture, metallic, roughness);
             auto model = modelLoader.LoadExisting(Mesh::CreateSphere(commandList));
             XMMATRIX worldMatrix = XMMatrixTranslation(x * 1.5f, 5.0f + y * 2.0f, 25.0f);
             m_SceneObjects.push_back({ worldMatrix, model, material });
@@ -285,7 +374,6 @@ void RaytracingDemo::LoadDeferredLightingScene(CommandList& commandList)
         pointLight.Color = XMFLOAT4(0.0f, 1.0f, 0.0f, 1.0f);
         m_PointLights.push_back(pointLight);
     }
-
 }
 
 void RaytracingDemo::AddRaytracingInstances()
@@ -312,6 +400,17 @@ void RaytracingDemo::OnUpdate(UpdateEventArgs& e)
 
     const float speedMultiplier = m_CameraController.Shift ? 16.0f : 4.0f;
     const float speed = speedMultiplier * m_DeltaTime;
+    const bool movedByKeyboard =
+        m_CameraController.Right != 0.0f ||
+        m_CameraController.Left != 0.0f ||
+        m_CameraController.Forward != 0.0f ||
+        m_CameraController.Backward != 0.0f ||
+        m_CameraController.Up != 0.0f ||
+        m_CameraController.Down != 0.0f;
+    if (movedByKeyboard)
+    {
+        ResetAccumulation();
+    }
 
     const XMVECTOR cameraTranslate = XMVectorSet(
         m_CameraController.Right - m_CameraController.Left,
@@ -338,65 +437,33 @@ void RaytracingDemo::OnRender(RenderEventArgs& e)
 {
     Base::OnRender(e);
 
-    const auto commandQueue = Application::Get().GetCommandQueue(D3D12_COMMAND_LIST_TYPE_DIRECT);
-    const auto commandList = commandQueue->GetCommandList();
-
-    CameraConstants camera{};
-    camera.InverseView = XMMatrixInverse(nullptr, m_Camera.GetViewMatrix());
-    camera.InverseProjection = XMMatrixInverse(nullptr, m_Camera.GetProjectionMatrix());
-    XMStoreFloat4(&camera.CameraPosition, m_Camera.GetTranslation());
-    camera.Width = static_cast<uint32_t>(m_Width);
-    camera.Height = static_cast<uint32_t>(m_Height);
-    camera.MaxBounces = 5;
-    camera.SamplesPerPixel = 1;
-    camera.LightCount = static_cast<uint32_t>(std::min<size_t>(m_PointLights.size(), MaxPathTracingLights));
-    camera.FrameIndex = m_FrameIndex++;
-    camera.TaaJitterOffset = m_Taa->ComputeJitterOffset();
-
-    for (uint32_t i = 0; i < camera.LightCount; ++i)
+    if (m_ImGui != nullptr)
     {
-        const PointLight& pointLight = m_PointLights[i];
-        camera.Lights[i].PositionAndRange = {
-            pointLight.PositionWs.x,
-            pointLight.PositionWs.y,
-            pointLight.PositionWs.z,
-            pointLight.Range
-        };
-        camera.Lights[i].ColorAndIntensity = {
-            pointLight.Color.x,
-            pointLight.Color.y,
-            pointLight.Color.z,
-            20.0f
-        };
-        camera.Lights[i].Attenuation = {
-            pointLight.ConstantAttenuation,
-            pointLight.LinearAttenuation,
-            pointLight.QuadraticAttenuation,
-            0.0f
-        };
+        m_ImGui->BeginFrame();
+        OnImGui();
+        m_ImGui->Render();
     }
 
-    {
-        PIXScope(*commandList, "Raytracing Demo");
-        m_RayTracingShader->SetConstantBufferData("CameraConstants", &camera, sizeof(camera));
-        m_RayTracingShader->Dispatch(*commandList, "RayGen", static_cast<uint32_t>(m_Width), static_cast<uint32_t>(m_Height));
-    }
+    RenderGraph::RenderMetadata metadata;
+    metadata.m_ScreenWidth = static_cast<uint32_t>(m_Width);
+    metadata.m_ScreenHeight = static_cast<uint32_t>(m_Height);
+    metadata.m_FrameIndex = m_FrameIndex;
+    metadata.m_Time = e.TotalTime;
 
-    {
-        static constexpr float ZERO_VELOCITY[] = { 0.0f, 0.0f, 0.0f, 0.0f };
-        commandList->ClearTexture(*m_TaaVelocityTexture, ZERO_VELOCITY);
+    m_RenderGraph->Execute(metadata);
+    m_RenderGraph->Present(PWindow);
 
-        m_RootSignature->Bind(*commandList);
-        m_Taa->Resolve(*commandList, m_RayTracingOutputTexture, m_TaaVelocityTexture, 0.88f);
-        m_Taa->OnRenderedFrame(m_Camera.GetViewMatrix() * m_Camera.GetProjectionMatrix());
-    }
-
-    commandQueue->ExecuteCommandList(commandList);
-    PWindow->Present(*m_Taa->GetResolvedTexture());
+    ++m_FrameIndex;
+    ++m_AccumulationFrameIndex;
 }
 
 void RaytracingDemo::OnKeyPressed(KeyEventArgs& e)
 {
+    if (m_ImGui != nullptr && m_ImGui->WantsToCaptureKeyboard())
+    {
+        return;
+    }
+
     Base::OnKeyPressed(e);
 
     switch (e.Key)
@@ -434,6 +501,11 @@ void RaytracingDemo::OnKeyPressed(KeyEventArgs& e)
 
 void RaytracingDemo::OnKeyReleased(KeyEventArgs& e)
 {
+    if (m_ImGui != nullptr && m_ImGui->WantsToCaptureKeyboard())
+    {
+        return;
+    }
+
     Base::OnKeyReleased(e);
 
     switch (e.Key)
@@ -468,25 +540,72 @@ void RaytracingDemo::OnKeyReleased(KeyEventArgs& e)
 
 void RaytracingDemo::OnMouseMoved(MouseMotionEventArgs& e)
 {
-    Base::OnMouseMoved(e);
-
-    if (!e.LeftButton)
+    if (m_ImGui != nullptr && m_ImGui->WantsToCaptureMouse())
     {
         return;
     }
 
-    constexpr float mouseSpeed = 0.1f;
-    m_CameraController.Pitch = Clamp(m_CameraController.Pitch - e.RelY * mouseSpeed, -90.0f, 90.0f);
-    m_CameraController.Yaw -= e.RelX * mouseSpeed;
+    Base::OnMouseMoved(e);
 
+    if (e.LeftButton)
+    {
+        constexpr float mouseSpeed = 0.1f;
+        if (e.RelX != 0 || e.RelY != 0)
+        {
+            m_CameraController.Pitch = Clamp(m_CameraController.Pitch - e.RelY * mouseSpeed, -90.0f, 90.0f);
+            m_CameraController.Yaw -= e.RelX * mouseSpeed;
+            ResetAccumulation();
+        }
+        return;
+    }
+
+    const float movementSpeed = m_CameraController.Shift ? 0.12f : 0.04f;
+
+    if (e.MiddleButton)
+    {
+        if (e.RelX != 0 || e.RelY != 0)
+        {
+            const XMVECTOR cameraPan = XMVectorSet(
+                static_cast<float>(-e.RelX) * movementSpeed,
+                static_cast<float>(e.RelY) * movementSpeed,
+                0.0f,
+                0.0f);
+            m_Camera.Translate(cameraPan, Space::Local);
+            ResetAccumulation();
+        }
+        return;
+    }
+
+    if (e.RightButton)
+    {
+        if (e.RelX != 0)
+        {
+            const XMVECTOR cameraForward = XMVectorSet(
+                0.0f,
+                0.0f,
+                static_cast<float>(e.RelX) * movementSpeed,
+                0.0f);
+            m_Camera.Translate(cameraForward, Space::Local);
+            ResetAccumulation();
+        }
+    }
 }
 
 void RaytracingDemo::OnMouseWheel(MouseWheelEventArgs& e)
 {
+    if (m_ImGui != nullptr && m_ImGui->WantsToCaptureMouse())
+    {
+        return;
+    }
+
     Base::OnMouseWheel(e);
     float fov = m_Camera.GetFov();
     fov = Clamp(fov - e.WheelDelta, 12.0f, 90.0f);
-    m_Camera.SetFov(fov);
+    if (fov != m_Camera.GetFov())
+    {
+        m_Camera.SetFov(fov);
+        ResetAccumulation();
+    }
 }
 
 void RaytracingDemo::OnResize(ResizeEventArgs& e)
@@ -500,22 +619,14 @@ void RaytracingDemo::OnResize(ResizeEventArgs& e)
 
     m_Width = std::max(1, e.Width);
     m_Height = std::max(1, e.Height);
+    m_FrameIndex = 0;
+    ResetAccumulation();
 
     const float aspectRatio = static_cast<float>(m_Width) / static_cast<float>(m_Height);
     m_Camera.SetProjection(45.0f, aspectRatio, 0.1f, 1000.0f);
 
-    if (m_RayTracingOutputTexture != nullptr)
+    if (m_RenderGraph != nullptr)
     {
-        ResizeRayTracingOutputTexture();
-    }
-
-    if (m_Taa != nullptr)
-    {
-        m_Taa->Resize(m_Width, m_Height);
-    }
-
-    if (m_TaaVelocityTexture != nullptr)
-    {
-        m_TaaVelocityTexture->Resize(m_Width, m_Height);
+        m_RenderGraph->MarkDirty();
     }
 }

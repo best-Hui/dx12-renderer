@@ -4,6 +4,7 @@
 #include <imgui_impl_win32.h>
 
 #include <DX12Library/Application.h>
+#include <DX12Library/CommandQueue.h>
 #include <DX12Library/Helpers.h>
 
 #include <Framework/Blit_VS.h>
@@ -19,6 +20,52 @@ namespace
     }
 }
 
+//Modify Begin:2026-07-21 by BestHui
+void ImGuiImpl::AllocateSrvDescriptor(
+    ImGui_ImplDX12_InitInfo* info,
+    D3D12_CPU_DESCRIPTOR_HANDLE* outCpuDescriptor,
+    D3D12_GPU_DESCRIPTOR_HANDLE* outGpuDescriptor)
+{
+    auto* self = static_cast<ImGuiImpl*>(info->UserData);
+    Assert(self != nullptr, "ImGui descriptor allocator is missing user data.");
+
+    for (UINT i = 0; i < static_cast<UINT>(self->m_FreeSrvDescriptors.size()); ++i)
+    {
+        if (!self->m_FreeSrvDescriptors[i])
+        {
+            continue;
+        }
+
+        self->m_FreeSrvDescriptors[i] = false;
+
+        const auto cpuStart = self->m_SrvDescHeap->GetCPUDescriptorHandleForHeapStart();
+        const auto gpuStart = self->m_SrvDescHeap->GetGPUDescriptorHandleForHeapStart();
+        outCpuDescriptor->ptr = cpuStart.ptr + static_cast<SIZE_T>(i) * self->m_SrvDescriptorSize;
+        outGpuDescriptor->ptr = gpuStart.ptr + static_cast<UINT64>(i) * self->m_SrvDescriptorSize;
+        return;
+    }
+
+    Assert(false, "ImGui SRV descriptor heap is full.");
+}
+
+void ImGuiImpl::FreeSrvDescriptor(
+    ImGui_ImplDX12_InitInfo* info,
+    D3D12_CPU_DESCRIPTOR_HANDLE cpuDescriptor,
+    D3D12_GPU_DESCRIPTOR_HANDLE gpuDescriptor)
+{
+    (void)gpuDescriptor;
+
+    auto* self = static_cast<ImGuiImpl*>(info->UserData);
+    Assert(self != nullptr, "ImGui descriptor allocator is missing user data.");
+
+    const auto cpuStart = self->m_SrvDescHeap->GetCPUDescriptorHandleForHeapStart();
+    const auto offset = cpuDescriptor.ptr - cpuStart.ptr;
+    const auto index = static_cast<UINT>(offset / self->m_SrvDescriptorSize);
+    Assert(index < self->m_FreeSrvDescriptors.size(), "ImGui SRV descriptor does not belong to this heap.");
+    self->m_FreeSrvDescriptors[index] = true;
+}
+//Modify End
+
 ImGuiImpl::ImGuiImpl(CommandList& commandList, const Window& window, const std::shared_ptr<CommonRootSignature>& pRootSignature)
     : m_CombineShader(std::make_shared<Shader>(pRootSignature,
         ShaderBlob(ShaderBytecode_Blit_VS, sizeof ShaderBytecode_Blit_VS),
@@ -30,16 +77,24 @@ ImGuiImpl::ImGuiImpl(CommandList& commandList, const Window& window, const std::
     ))
     , m_BlitMesh(Mesh::CreateBlitTriangle(commandList))
     , m_RootSignature(pRootSignature)
+    //Modify Begin:2026-07-21 by BestHui
+    , m_FreeSrvDescriptors(ImGuiSrvDescriptorCount, true)
+    //Modify End
 {
     const auto pDevice = Application::Get().GetDevice();
 
     {
         D3D12_DESCRIPTOR_HEAP_DESC desc = {};
         desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-        desc.NumDescriptors = 1;
+        //Modify Begin:2026-07-21 by BestHui
+        desc.NumDescriptors = ImGuiSrvDescriptorCount;
+        //Modify End
         desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
         ThrowIfFailed(pDevice->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&m_SrvDescHeap)));
     }
+    //Modify Begin:2026-07-21 by BestHui
+    m_SrvDescriptorSize = pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    //Modify End
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -52,14 +107,20 @@ ImGuiImpl::ImGuiImpl(CommandList& commandList, const Window& window, const std::
     ImGui::StyleColorsDark();
 
     ImGui_ImplWin32_Init(window.GetWindowHandle());
-    ImGui_ImplDX12_Init(
-        pDevice.Get(),
-        Window::BUFFER_COUNT,
-        BUFFER_FORMAT,
-        m_SrvDescHeap.Get(),
-        m_SrvDescHeap->GetCPUDescriptorHandleForHeapStart(),
-        m_SrvDescHeap->GetGPUDescriptorHandleForHeapStart()
-    );
+    //Modify Begin:2026-07-21 by BestHui
+    const auto commandQueue = Application::Get().GetCommandQueue(D3D12_COMMAND_LIST_TYPE_DIRECT)->GetD3D12CommandQueue();
+    ImGui_ImplDX12_InitInfo initInfo = {};
+    initInfo.Device = pDevice.Get();
+    initInfo.CommandQueue = commandQueue.Get();
+    initInfo.NumFramesInFlight = Window::BUFFER_COUNT;
+    initInfo.RTVFormat = BUFFER_FORMAT;
+    initInfo.DSVFormat = DXGI_FORMAT_UNKNOWN;
+    initInfo.UserData = this;
+    initInfo.SrvDescriptorHeap = m_SrvDescHeap.Get();
+    initInfo.SrvDescriptorAllocFn = AllocateSrvDescriptor;
+    initInfo.SrvDescriptorFreeFn = FreeSrvDescriptor;
+    Assert(ImGui_ImplDX12_Init(&initInfo), "Failed to initialize ImGui DX12 backend.");
+    //Modify End
 
     Application::AddWndProcHandler(ImGui_ImplWin32_WndProcHandler);
     Application::AddKeyDownListener(AddInputCharacter);
