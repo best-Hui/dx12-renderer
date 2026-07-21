@@ -1,3 +1,8 @@
+#define RAYTRACING_DEMO_ENABLE_LINALG 0
+
+#if defined(RAYTRACING_DEMO_ENABLE_LINALG) && RAYTRACING_DEMO_ENABLE_LINALG
+#include <hlsl/dx/linalg.h>
+#endif
 #include "RaytracingDemo_RT_GBuffer.hlsli"
 #include "RaytracingDemo_RT_Lighting.hlsli"
 
@@ -10,6 +15,18 @@ float3 ToneMap(float3 color)
 {
     color = color / (color + 1.0f);
     return pow(saturate(color), 1.0f / 2.2f);
+}
+
+float3 ApplyClosestHitCooperativeVector(float3 color)
+{
+#if defined(RAYTRACING_DEMO_ENABLE_LINALG) && RAYTRACING_DEMO_ENABLE_LINALG
+    uint3 quantizedColor = uint3(saturate(color) * 1024.0f + 0.5f);
+    dx::linalg::InterpretedVector<float, 3, dx::linalg::ComponentType::F32> convertedColor =
+        dx::linalg::Convert<dx::linalg::ComponentType::F32, dx::linalg::ComponentType::U32>(quantizedColor);
+    return saturate(float3(convertedColor.Data[0], convertedColor.Data[1], convertedColor.Data[2]) / 1024.0f);
+#else
+    return color;
+#endif
 }
 
 [shader("raygeneration")]
@@ -82,5 +99,5 @@ void ClosestHit(inout RayPayload payload, BuiltInTriangleIntersectionAttributes 
     payload.Hit = 1u;
     payload.HitT = RayTCurrent();
     payload.Normal = normalWs;
-    payload.BaseColor = material.Diffuse.rgb * texel.rgb;
+    payload.BaseColor = ApplyClosestHitCooperativeVector(material.Diffuse.rgb * texel.rgb);
 }

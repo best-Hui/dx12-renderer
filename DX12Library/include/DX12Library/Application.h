@@ -47,6 +47,16 @@ class DescriptorAllocator;
 class Game;
 class Window;
 
+//Modify Begin:2026-07-21 by BestHui
+struct ExternalD3D12Context
+{
+    ID3D12Device* Device = nullptr;
+    ID3D12CommandQueue* DirectCommandQueue = nullptr;
+    ID3D12CommandQueue* ComputeCommandQueue = nullptr;
+    ID3D12CommandQueue* CopyCommandQueue = nullptr;
+};
+//Modify End
+
 class Application
 {
 public:
@@ -54,6 +64,9 @@ public:
     * Create the application singleton with the application instance handle.
     */
     static void Create(HINSTANCE hInst);
+//Modify Begin:2026-07-21 by BestHui
+    static void Create(HINSTANCE hInst, const ExternalD3D12Context& externalContext);
+//Modify End
 
     /**
     * Destroy the application instance and all windows created by this application instance.
@@ -120,6 +133,9 @@ public:
      * Get the Direct3D 12 device
      */
     Microsoft::WRL::ComPtr<ID3D12Device2> GetDevice() const;
+//Modify Begin:2026-07-21 by BestHui
+    bool UsesExternalDevice() const;
+//Modify End
     /**
      * Get a command queue. Valid types are:
      * - D3D12_COMMAND_LIST_TYPE_DIRECT : Can be used for draw, dispatch, or copy commands.
@@ -164,11 +180,16 @@ public:
 protected:
     // Create an application instance.
     Application(HINSTANCE hInst);
+//Modify Begin:2026-07-21 by BestHui
+    Application(HINSTANCE hInst, const ExternalD3D12Context* externalContext);
+//Modify End
     // Destroy the application instance and all windows associated with this application.
     virtual ~Application();
 
     // Initialize the application instance.
-    void Initialize();
+//Modify Begin:2026-07-21 by BestHui
+    void Initialize(const ExternalD3D12Context* externalContext = nullptr);
+//Modify End
 
     Microsoft::WRL::ComPtr<IDXGIAdapter4> GetAdapter(bool bUseWarp);
     Microsoft::WRL::ComPtr<ID3D12Device2> CreateDevice(Microsoft::WRL::ComPtr<IDXGIAdapter4> adapter);
@@ -191,6 +212,9 @@ private:
     std::unique_ptr<DescriptorAllocator> m_DescriptorAllocators[D3D12_DESCRIPTOR_HEAP_TYPE_NUM_TYPES];
 
     bool m_TearingSupported;
+//Modify Begin:2026-07-21 by BestHui
+    bool m_UsesExternalDevice;
+//Modify End
 
     static uint64_t s_FrameCount;
 

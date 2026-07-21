@@ -63,6 +63,7 @@ public:
     void Build(CommandList& commandList, const std::vector<RayTracingMeshInstance>& instances);
     void Update(CommandList& commandList);
 
+    bool IsBuilt() const;
     D3D12_GPU_VIRTUAL_ADDRESS GetGpuVirtualAddress() const;
     const std::vector<std::shared_ptr<Mesh>>& GetMeshes() const;
     const std::vector<RayTracingGeometryData>& GetGeometryData() const;

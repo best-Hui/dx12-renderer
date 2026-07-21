@@ -67,20 +67,25 @@ void ImGuiImpl::FreeSrvDescriptor(
 //Modify End
 
 ImGuiImpl::ImGuiImpl(CommandList& commandList, const Window& window, const std::shared_ptr<CommonRootSignature>& pRootSignature)
-    : m_CombineShader(std::make_shared<Shader>(pRootSignature,
+    : m_RootSignature(pRootSignature)
+    //Modify Begin:2026-07-21 by BestHui
+    , m_FreeSrvDescriptors(ImGuiSrvDescriptorCount, true)
+    //Modify End
+{
+//Modify Begin:2026-07-21 by BestHui
+    m_CombineShader = std::make_shared<Shader>(pRootSignature,
         ShaderBlob(ShaderBytecode_Blit_VS, sizeof ShaderBytecode_Blit_VS),
         ShaderBlob(ShaderBytecode_ImGuiCombine_PS, sizeof ShaderBytecode_ImGuiCombine_PS),
         [](PipelineStateBuilder& psb)
         {
             psb.WithAlphaBlend();
-        }
-    ))
-    , m_BlitMesh(Mesh::CreateBlitTriangle(commandList))
-    , m_RootSignature(pRootSignature)
-    //Modify Begin:2026-07-21 by BestHui
-    , m_FreeSrvDescriptors(ImGuiSrvDescriptorCount, true)
-    //Modify End
-{
+        },
+        false
+    );
+
+    m_BlitMesh = Mesh::CreateBlitTriangle(commandList);
+//Modify End
+
     const auto pDevice = Application::Get().GetDevice();
 
     {

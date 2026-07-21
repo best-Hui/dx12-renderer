@@ -1,6 +1,10 @@
 ﻿#include "VertexBuffer.h"
 
 #include "DX12LibPCH.h"
+//Modify Begin:2026-07-21 by BestHui
+#include "Application.h"
+#include "Helpers.h"
+//Modify End
 
 
 VertexBuffer::VertexBuffer(const std::wstring& name)
@@ -8,6 +12,9 @@ VertexBuffer::VertexBuffer(const std::wstring& name)
 	, NumVertices(0)
 	, VertexStride(0)
 	, VertexBufferView({})
+//Modify Begin:2026-07-21 by BestHui
+	, m_Srv(Application::Get().AllocateDescriptors(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV))
+//Modify End
 {
 }
 
@@ -23,11 +30,29 @@ void VertexBuffer::CreateViews(const size_t numElements, const size_t elementSiz
 	VertexBufferView.BufferLocation = m_d3d12Resource->GetGPUVirtualAddress();
 	VertexBufferView.SizeInBytes = static_cast<UINT>(NumVertices * VertexStride);
 	VertexBufferView.StrideInBytes = static_cast<UINT>(VertexStride);
+
+//Modify Begin:2026-07-21 by BestHui
+	D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+	srvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+	srvDesc.Format = DXGI_FORMAT_UNKNOWN;
+	srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+	srvDesc.Buffer.NumElements = static_cast<UINT>(NumVertices);
+	srvDesc.Buffer.StructureByteStride = static_cast<UINT>(VertexStride);
+	srvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
+	Application::Get().GetDevice()->CreateShaderResourceView(m_d3d12Resource.Get(), &srvDesc, m_Srv.GetDescriptorHandle());
+//Modify End
 }
 
 D3D12_CPU_DESCRIPTOR_HANDLE VertexBuffer::GetShaderResourceView(const D3D12_SHADER_RESOURCE_VIEW_DESC* srvDesc) const
 {
-	throw std::exception("VertexBuffer::GetShaderResourceView should not be called.");
+//Modify Begin:2026-07-21 by BestHui
+	if (srvDesc != nullptr)
+	{
+		Assert(false, "Custom vertex buffer SRV descriptors are not supported.");
+	}
+
+	return m_Srv.GetDescriptorHandle();
+//Modify End
 }
 
 D3D12_CPU_DESCRIPTOR_HANDLE VertexBuffer::GetUnorderedAccessView(const D3D12_UNORDERED_ACCESS_VIEW_DESC* uavDesc) const

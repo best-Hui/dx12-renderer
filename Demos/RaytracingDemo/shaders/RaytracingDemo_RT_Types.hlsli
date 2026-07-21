@@ -1,6 +1,14 @@
 #ifndef RAYTRACING_DEMO_RT_TYPES_HLSLI
 #define RAYTRACING_DEMO_RT_TYPES_HLSLI
 
+#if !defined(RAYTRACING_DEMO_USE_ANNOTATED_PAYLOAD)
+#if defined(__SHADER_TARGET_MAJOR) && defined(__SHADER_TARGET_MINOR) && (__SHADER_TARGET_MAJOR > 6 || (__SHADER_TARGET_MAJOR == 6 && __SHADER_TARGET_MINOR >= 10))
+#define RAYTRACING_DEMO_USE_ANNOTATED_PAYLOAD 1
+#else
+#define RAYTRACING_DEMO_USE_ANNOTATED_PAYLOAD 0
+#endif
+#endif
+
 static const float PI = 3.14159265359f;
 static const float INV_PI = 0.31830988618f;
 static const uint MaxPathTracingLights = 8;
@@ -45,6 +53,15 @@ struct PathTracingLightData
     float4 Attenuation;
 };
 
+#if RAYTRACING_DEMO_USE_ANNOTATED_PAYLOAD
+struct [raypayload] RayPayload
+{
+    float3 BaseColor : read(caller) : write(caller, closesthit, miss);
+    float HitT : read(caller) : write(caller, closesthit, miss);
+    float3 Normal : read(caller) : write(caller, closesthit, miss);
+    uint Hit : read(caller) : write(caller, closesthit, miss);
+};
+#else
 struct RayPayload
 {
     float3 BaseColor;
@@ -52,6 +69,7 @@ struct RayPayload
     float3 Normal;
     uint Hit;
 };
+#endif
 
 struct SurfaceData
 {

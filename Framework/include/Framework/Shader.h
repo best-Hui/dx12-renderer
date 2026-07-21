@@ -25,7 +25,10 @@ public:
 	explicit Shader(
 		const std::shared_ptr<CommonRootSignature>& rootSignature,
 		const ShaderBlob& vertexShaderPath, const ShaderBlob& pixelShaderPath,
-		const std::function<void(PipelineStateBuilder&)> buildPipelineState = [](PipelineStateBuilder&) {}
+//Modify Begin:2026-07-21 by BestHui
+		const std::function<void(PipelineStateBuilder&)> buildPipelineState = [](PipelineStateBuilder&) {},
+		bool collectMetadata = true
+//Modify End
 	);
 
 	Shader(const Shader& other) = delete;

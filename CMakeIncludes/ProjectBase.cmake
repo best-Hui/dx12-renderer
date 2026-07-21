@@ -33,7 +33,9 @@ source_group("Resources\\Shaders" FILES ${SHADER_FILES})
 
 set_source_files_properties(${SHADER_FILES}
         PROPERTIES
-        VS_SHADER_MODEL 6.0
+# Modify Begin:2026-07-21 by BestHui
+        VS_SHADER_MODEL 6.6
+# Modify End
         VS_SHADER_DISABLE_OPTIMIZATIONS $<$<CONFIG:Debug>:ON>
         VS_SHADER_ENABLE_DEBUG $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:ON>
         VS_SHADER_FLAGS "/I \"${CMAKE_SOURCE_DIR}/Shaders\" -WX /Zi -Qembed_debug" # include shader library, treat warnings as errors, enable debugging

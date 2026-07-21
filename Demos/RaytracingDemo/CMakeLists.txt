@@ -34,6 +34,10 @@ set(SHADER_FILES_PIXEL
         shaders/RaytracingDemo_Skybox_PS.hlsl
         )
 
+set(SHADER_FILES_COMPUTE
+        shaders/RaytracingDemo_InlineRT_CS.hlsl
+        )
+
 set(TARGET_NAME RaytracingDemo)
 include(${CMAKE_SOURCE_DIR}/CMakeIncludes/ProjectBase.cmake)
 include(${CMAKE_SOURCE_DIR}/CMakeIncludes/DemoBase.cmake)
@@ -47,16 +51,33 @@ target_link_libraries(${TARGET_NAME}
         PUBLIC RenderGraph
         )
 
-file(GLOB DXC_CANDIDATES "C:/Program Files (x86)/Windows Kits/10/bin/*/x64/dxc.exe")
-list(SORT DXC_CANDIDATES)
-list(GET DXC_CANDIDATES -1 DXC_EXECUTABLE)
+# Modify Begin:2026-07-21 by BestHui
+set(PROJECT_DXC_EXECUTABLE "${CMAKE_SOURCE_DIR}/DXC/dxc.exe")
+if (EXISTS "${PROJECT_DXC_EXECUTABLE}")
+        set(DXC_EXECUTABLE "${PROJECT_DXC_EXECUTABLE}")
+else()
+        file(GLOB DXC_CANDIDATES "C:/Program Files (x86)/Windows Kits/10/bin/*/x64/dxc.exe")
+        list(SORT DXC_CANDIDATES)
+        list(GET DXC_CANDIDATES -1 DXC_EXECUTABLE)
+endif()
+# Modify End
 
 set(RAYTRACING_SHADER_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/${SHADER_FILES_RAYTRACING}")
 set(RAYTRACING_SHADER_OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/Shaders/RaytracingDemo_RT.cso")
 
+# Modify Begin:2026-07-21 by BestHui
+set(RAYTRACING_SHADER_MODEL lib_6_6)
+if (DX12_RENDERER_ENABLE_SM610_LINALG)
+        set(RAYTRACING_SHADER_MODEL lib_6_10)
+        target_compile_definitions(${TARGET_NAME} PRIVATE DX12_RENDERER_ENABLE_SM610_LINALG=1)
+endif()
+# Modify End
+
 add_custom_command(TARGET ${TARGET_NAME} PRE_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/Shaders"
-        COMMAND "${DXC_EXECUTABLE}" -T lib_6_3 -Fo "${RAYTRACING_SHADER_OUTPUT}" "${RAYTRACING_SHADER_SOURCE}" -I "${CMAKE_SOURCE_DIR}/Shaders" -I "${CMAKE_CURRENT_SOURCE_DIR}/shaders" -WX
+# Modify Begin:2026-07-21 by BestHui
+        COMMAND "${DXC_EXECUTABLE}" -T ${RAYTRACING_SHADER_MODEL} -HV 2021 -Fo "${RAYTRACING_SHADER_OUTPUT}" "${RAYTRACING_SHADER_SOURCE}" -I "${CMAKE_SOURCE_DIR}/DXC/include" -I "${CMAKE_SOURCE_DIR}/Shaders" -I "${CMAKE_CURRENT_SOURCE_DIR}/shaders" -WX
+# Modify End
         VERBATIM
 )
 

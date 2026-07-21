@@ -1,5 +1,8 @@
 #include "ShaderUtils.h"
 #include <dxcapi.h>
+//Modify Begin:2026-07-21 by BestHui
+#include <d3dcompiler.h>
+//Modify End
 #include "Helpers.h"
 #include "Application.h"
 
@@ -62,7 +65,18 @@ Microsoft::WRL::ComPtr<ID3D12ShaderReflection> ShaderUtils::Reflect(const Micros
     UINT32 shaderIdx;
     ThrowIfFailed(DxcCreateInstance(CLSID_DxcContainerReflection, IID_PPV_ARGS(&pReflection)));
     ThrowIfFailed(pReflection->Load(shaderSourceDxc.Get()));
-    ThrowIfFailed(pReflection->FindFirstPartKind(hlsl::DFCC_DXIL, &shaderIdx));
+//Modify Begin:2026-07-21 by BestHui
+    const HRESULT findDxilResult = pReflection->FindFirstPartKind(hlsl::DFCC_DXIL, &shaderIdx);
+    if (FAILED(findDxilResult))
+    {
+        Microsoft::WRL::ComPtr<ID3D12ShaderReflection> reflection;
+        ThrowIfFailed(D3DReflect(
+            shaderSource->GetBufferPointer(),
+            shaderSource->GetBufferSize(),
+            IID_PPV_ARGS(&reflection)));
+        return reflection;
+    }
+//Modify End
 
     Microsoft::WRL::ComPtr<ID3D12ShaderReflection> reflection;
     ThrowIfFailed(pReflection->GetPartReflection(shaderIdx, __uuidof(ID3D12ShaderReflection), (void**)&reflection));

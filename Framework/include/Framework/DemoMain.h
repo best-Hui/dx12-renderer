@@ -10,6 +10,9 @@
 
 #include <Framework/GraphicsSettings.h>
 
+//Modify Begin:2026-07-21 by BestHui
+#include <fstream>
+//Modify End
 
 #ifdef DEMO_TYPE
 
@@ -21,8 +24,13 @@
 
 void ReportLiveObjects()
 {
-	IDXGIDebug1* dxgiDebug;
-	DXGIGetDebugInterface1(0, IID_PPV_ARGS(&dxgiDebug));
+	IDXGIDebug1* dxgiDebug = nullptr;
+//Modify Begin:2026-07-21 by BestHui
+	if (FAILED(DXGIGetDebugInterface1(0, IID_PPV_ARGS(&dxgiDebug))) || dxgiDebug == nullptr)
+	{
+		return;
+	}
+//Modify End
 
 	dxgiDebug->ReportLiveObjects(DXGI_DEBUG_ALL, DXGI_DEBUG_RLO_IGNORE_INTERNAL);
 	dxgiDebug->Release();
@@ -93,12 +101,34 @@ int CALLBACK wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR lpCmdL
 	Parameters parameters;
 	ParseCommandLineArguments(parameters);
 
-	Application::Create(hInstance);
+//Modify Begin:2026-07-21 by BestHui
+	const char* applicationStage = "Create";
+	const HRESULT coInitializeResult = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+	const bool shouldUninitializeCom = SUCCEEDED(coInitializeResult);
+	try
 	{
-		const auto demo = CreateGame(parameters);
-		retCode = Application::Get().Run(demo);
+		Application::Create(hInstance);
+		{
+			applicationStage = "CreateGame";
+			const auto demo = CreateGame(parameters);
+			applicationStage = "Run";
+			retCode = Application::Get().Run(demo);
+		}
+		applicationStage = "Destroy";
+		Application::Destroy();
 	}
-	Application::Destroy();
+	catch (const std::exception& exception)
+	{
+		std::ofstream errorLog("DemoException.log", std::ios::out | std::ios::trunc);
+		errorLog << "Stage=" << applicationStage << std::endl;
+		errorLog << exception.what() << std::endl;
+		retCode = 3;
+	}
+	if (shouldUninitializeCom)
+	{
+		CoUninitialize();
+	}
+//Modify End
 
 	atexit(&ReportLiveObjects);
 

@@ -12,6 +12,10 @@ cmake_policy(SET CMP0079 NEW)
 
 project(LearningDirectX12 LANGUAGES CXX)
 
+# Modify Begin:2026-07-21 by BestHui
+option(DX12_RENDERER_ENABLE_SM610_LINALG "Build RaytracingDemo CHS with the SM6.10 LinAlg preview path." ON)
+# Modify End
+
 # Libraries
 add_subdirectory(DX12Library)
 # Modify Begin:2026-07-21 by BestHui

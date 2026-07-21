@@ -1,20 +1,16 @@
-# WinPixEventRuntime
-add_custom_command(TARGET ${TARGET_NAME} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        ${CMAKE_SOURCE_DIR}/WinPixEventRuntime/bin/WinPixEventRuntime.dll
-        $<TARGET_FILE_DIR:${TARGET_NAME}>
-        )
+# Modify Begin:2026-07-21 by BestHui
+# Copy shared runtime DLLs once to avoid parallel post-build copy races.
+if (NOT TARGET CopyRuntimeDlls)
+        add_custom_target(CopyRuntimeDlls
+                COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/$<CONFIG>"
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/WinPixEventRuntime/bin/WinPixEventRuntime.dll" "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/$<CONFIG>"
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/DXC/dxil.dll" "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/$<CONFIG>"
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/DXC/dxcompiler.dll" "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/$<CONFIG>"
+                COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/$<CONFIG>/D3D12"
+                COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/D3D12" "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/$<CONFIG>/D3D12"
+                VERBATIM
+                )
+endif()
 
-# dxil
-add_custom_command(TARGET ${TARGET_NAME} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        ${CMAKE_SOURCE_DIR}/DXC/dxil.dll
-        $<TARGET_FILE_DIR:${TARGET_NAME}>
-        )
-
-# dxcompiler
-add_custom_command(TARGET ${TARGET_NAME} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        ${CMAKE_SOURCE_DIR}/DXC/dxcompiler.dll
-        $<TARGET_FILE_DIR:${TARGET_NAME}>
-        )
+add_dependencies(${TARGET_NAME} CopyRuntimeDlls)
+# Modify End

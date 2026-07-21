@@ -2,15 +2,27 @@
 #include <DX12Library/ShaderUtils.h>
 #include <DX12Library/Application.h>
 
-Shader::Shader(const std::shared_ptr<CommonRootSignature>& rootSignature, const ShaderBlob& vertexShader, const ShaderBlob& pixelShader, const std::function<void(PipelineStateBuilder&)> buildPipelineState)
+Shader::Shader(
+    const std::shared_ptr<CommonRootSignature>& rootSignature,
+    const ShaderBlob& vertexShader,
+    const ShaderBlob& pixelShader,
+    const std::function<void(PipelineStateBuilder&)> buildPipelineState,
+//Modify Begin:2026-07-21 by BestHui
+    bool collectMetadata)
+//Modify End
     : m_RootSignature(rootSignature)
     , m_PipelineStateBuilder(rootSignature)
 {
     m_PipelineStateBuilder.WithShaders(vertexShader.GetBlob(), pixelShader.GetBlob());
     buildPipelineState(m_PipelineStateBuilder);
 
-    CollectShaderMetadata(vertexShader.GetBlob(), &m_VertexShaderMetadata);
-    CollectShaderMetadata(pixelShader.GetBlob(), &m_PixelShaderMetadata);
+//Modify Begin:2026-07-21 by BestHui
+    if (collectMetadata)
+    {
+        CollectShaderMetadata(vertexShader.GetBlob(), &m_VertexShaderMetadata);
+        CollectShaderMetadata(pixelShader.GetBlob(), &m_PixelShaderMetadata);
+    }
+//Modify End
 }
 
 void Shader::Bind(CommandList& commandList)

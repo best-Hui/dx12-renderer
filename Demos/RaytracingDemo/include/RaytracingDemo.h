@@ -7,6 +7,7 @@
 #include <Framework/ImGuiImpl.h>
 #include <Framework/Light.h>
 #include <Framework/Model.h>
+#include <Framework/ComputeShader.h>
 #include <Framework/RayTracingAccelerationStructure.h>
 #include <Framework/RayTracingShader.h>
 #include <Framework/Shader.h>
@@ -32,6 +33,10 @@ public:
 
     RaytracingDemo(const std::wstring& name, int width, int height, GraphicsSettings graphicsSettings);
 
+    static constexpr uint32_t MaxPathTracingLights = 8;
+    static constexpr uint32_t MaxInlineRayTracingTextures = 8;
+    static constexpr uint32_t MaxInlineRayTracingGeometryBuffers = 256;
+
     bool LoadContent() override;
     void UnloadContent() override;
 
@@ -45,8 +50,6 @@ protected:
     void OnResize(ResizeEventArgs& e) override;
 
 private:
-    static constexpr uint32_t MaxPathTracingLights = 8;
-
     struct MaterialData
     {
         DirectX::XMFLOAT4 Diffuse = { 1.0f, 1.0f, 1.0f, 1.0f };
@@ -118,6 +121,12 @@ private:
         uint32_t MaterialIndex = 0;
     };
 
+    enum class RayTracingExecutionMode
+    {
+        StandardDxr = 0,
+        InlineRayTracing = 1,
+    };
+
     uint32_t AddTexture(CommandList& commandList, const std::wstring& path, TextureUsageType usage = TextureUsageType::Albedo);
     uint32_t AddMaterial(const MaterialData& material);
     uint32_t AddDiffuseMaterial(
@@ -138,6 +147,7 @@ private:
     friend class RenderGraph::User;
     std::unique_ptr<RenderGraph::RenderGraphRoot> m_RenderGraph;
     std::unique_ptr<RayTracingShader> m_RayTracingShader;
+    std::unique_ptr<ComputeShader> m_InlineRayTracingShader;
     RayTracingAccelerationStructure m_RayTracingAccelerationStructure;
     StructuredBuffer m_MaterialBuffer;
     StructuredBuffer m_GeometryBuffer;
@@ -158,6 +168,12 @@ private:
     uint32_t m_FrameIndex = 0;
     uint32_t m_AccumulationFrameIndex = 0;
     int m_MaxBounces = 5;
+    float m_CameraFov = 45.0f;
+    float m_MouseRotateSpeed = 0.1f;
+    float m_MousePanSpeed = 0.04f;
+    float m_MouseDollySpeed = 0.04f;
+    float m_MouseWheelDollySpeed = 0.5f;
+    RayTracingExecutionMode m_RayTracingExecutionMode = RayTracingExecutionMode::StandardDxr;
     int m_Width = 1;
     int m_Height = 1;
 

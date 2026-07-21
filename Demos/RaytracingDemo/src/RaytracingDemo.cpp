@@ -21,6 +21,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <cstring>
 #include <vector>
 
 #include "RenderGraph.User.h"
@@ -58,7 +60,16 @@ RaytracingDemo::RaytracingDemo(const std::wstring& name, const int width, const 
     const XMVECTOR cameraTarget = XMVectorSet(0, 5, 18, 1);
     const XMVECTOR cameraUp = XMVectorSet(0, 1, 0, 0);
     m_Camera.SetLookAt(cameraPos, cameraTarget, cameraUp);
-    m_Camera.SetProjection(45.0f, static_cast<float>(m_Width) / static_cast<float>(m_Height), 0.1f, 1000.0f);
+    m_Camera.SetProjection(m_CameraFov, static_cast<float>(m_Width) / static_cast<float>(m_Height), 0.1f, 1000.0f);
+
+    char* mode = nullptr;
+    size_t modeLength = 0;
+    _dupenv_s(&mode, &modeLength, "RAYTRACING_DEMO_MODE");
+    if (mode != nullptr && std::strcmp(mode, "inline") == 0)
+    {
+        m_RayTracingExecutionMode = RayTracingExecutionMode::InlineRayTracing;
+    }
+    std::free(mode);
 }
 
 bool RaytracingDemo::LoadContent()
@@ -82,7 +93,9 @@ bool RaytracingDemo::LoadContent()
     m_GBufferShader = std::make_shared<Shader>(
         m_RootSignature,
         ShaderBlob(L"RaytracingDemo_GBuffer_VS.cso"),
-        ShaderBlob(L"RaytracingDemo_GBuffer_PS.cso"));
+        ShaderBlob(L"RaytracingDemo_GBuffer_PS.cso"),
+        [](PipelineStateBuilder&) {},
+        false);
 
     m_SkyboxShader = std::make_shared<Shader>(
         m_RootSignature,
@@ -97,13 +110,15 @@ bool RaytracingDemo::LoadContent()
             depthStencil.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
 
             builder.WithRasterizer(rasterizer).WithDepthStencil(depthStencil);
-        });
+        },
+        false);
 
     RayTracingPipelineDesc rayTracingDesc = RayTracingShader::CreateDefaultPipelineDesc();
     rayTracingDesc.Bindings.push_back({ "GBufferTextures", RayTracingShaderBindingType::TextureArray, 0, 4, 4 });
     rayTracingDesc.Bindings.push_back({ "Skybox", RayTracingShaderBindingType::TextureArray, 0, 5, 1 });
     rayTracingDesc.Bindings.push_back({ "Accumulation", RayTracingShaderBindingType::OutputTexture, 1, 0, 1 });
     m_RayTracingShader = std::make_unique<RayTracingShader>(ShaderBlob(L"RaytracingDemo_RT.cso"), rayTracingDesc);
+    m_InlineRayTracingShader = std::make_unique<ComputeShader>(m_RootSignature, ShaderBlob(L"RaytracingDemo_InlineRT_CS.cso"));
 
     AddRaytracingInstances();
 
@@ -130,6 +145,7 @@ void RaytracingDemo::UnloadContent()
     m_ImGui.reset();
     m_RootSignature.reset();
     m_SkyboxTexture.reset();
+    m_InlineRayTracingShader.reset();
     m_RayTracingShader.reset();
     m_SceneObjects.clear();
     m_Materials.clear();
@@ -220,7 +236,33 @@ void RaytracingDemo::OnImGui()
     ImGui::Text("Resolution: %d x %d", m_Width, m_Height);
     ImGui::Text("Frame: %u", m_FrameIndex);
     ImGui::Text("Accumulation: %u", m_AccumulationFrameIndex);
-    if (ImGui::SliderInt("Bounces", &m_MaxBounces, 0, 5))
+
+    const char* modeNames[] = { "Standard DXR", "Inline RayQuery CS" };
+    int selectedMode = static_cast<int>(m_RayTracingExecutionMode);
+    if (ImGui::Combo("Mode", &selectedMode, modeNames, 2))
+    {
+        m_RayTracingExecutionMode = static_cast<RayTracingExecutionMode>(selectedMode);
+        ResetAccumulation();
+    }
+
+    const bool bouncesChanged = ImGui::SliderInt("Bounces", &m_MaxBounces, 0, 5);
+    const bool fovChanged = ImGui::SliderFloat("FOV", &m_CameraFov, 12.0f, 90.0f, "%.1f");
+    const bool rotateSpeedChanged = ImGui::SliderFloat("Mouse Rotate", &m_MouseRotateSpeed, 0.01f, 0.5f, "%.3f");
+    const bool panSpeedChanged = ImGui::SliderFloat("Mouse Pan", &m_MousePanSpeed, 0.005f, 0.25f, "%.3f");
+    const bool dollySpeedChanged = ImGui::SliderFloat("Mouse Dolly", &m_MouseDollySpeed, 0.005f, 0.25f, "%.3f");
+    const bool wheelSpeedChanged = ImGui::SliderFloat("Wheel Dolly", &m_MouseWheelDollySpeed, 0.05f, 5.0f, "%.2f");
+
+    if (bouncesChanged)
+    {
+        ResetAccumulation();
+    }
+    if (fovChanged)
+    {
+        const float aspectRatio = static_cast<float>(m_Width) / static_cast<float>(m_Height);
+        m_Camera.SetProjection(m_CameraFov, aspectRatio, 0.1f, 1000.0f);
+        ResetAccumulation();
+    }
+    if (rotateSpeedChanged || panSpeedChanged || dollySpeedChanged || wheelSpeedChanged)
     {
         ResetAccumulation();
     }
@@ -549,25 +591,22 @@ void RaytracingDemo::OnMouseMoved(MouseMotionEventArgs& e)
 
     if (e.LeftButton)
     {
-        constexpr float mouseSpeed = 0.1f;
         if (e.RelX != 0 || e.RelY != 0)
         {
-            m_CameraController.Pitch = Clamp(m_CameraController.Pitch - e.RelY * mouseSpeed, -90.0f, 90.0f);
-            m_CameraController.Yaw -= e.RelX * mouseSpeed;
+            m_CameraController.Pitch = Clamp(m_CameraController.Pitch - e.RelY * m_MouseRotateSpeed, -90.0f, 90.0f);
+            m_CameraController.Yaw -= e.RelX * m_MouseRotateSpeed;
             ResetAccumulation();
         }
         return;
     }
-
-    const float movementSpeed = m_CameraController.Shift ? 0.12f : 0.04f;
 
     if (e.MiddleButton)
     {
         if (e.RelX != 0 || e.RelY != 0)
         {
             const XMVECTOR cameraPan = XMVectorSet(
-                static_cast<float>(-e.RelX) * movementSpeed,
-                static_cast<float>(e.RelY) * movementSpeed,
+                static_cast<float>(-e.RelX) * m_MousePanSpeed,
+                static_cast<float>(e.RelY) * m_MousePanSpeed,
                 0.0f,
                 0.0f);
             m_Camera.Translate(cameraPan, Space::Local);
@@ -583,7 +622,7 @@ void RaytracingDemo::OnMouseMoved(MouseMotionEventArgs& e)
             const XMVECTOR cameraForward = XMVectorSet(
                 0.0f,
                 0.0f,
-                static_cast<float>(e.RelX) * movementSpeed,
+                static_cast<float>(e.RelX) * m_MouseDollySpeed,
                 0.0f);
             m_Camera.Translate(cameraForward, Space::Local);
             ResetAccumulation();
@@ -599,11 +638,14 @@ void RaytracingDemo::OnMouseWheel(MouseWheelEventArgs& e)
     }
 
     Base::OnMouseWheel(e);
-    float fov = m_Camera.GetFov();
-    fov = Clamp(fov - e.WheelDelta, 12.0f, 90.0f);
-    if (fov != m_Camera.GetFov())
+    if (e.WheelDelta != 0.0f)
     {
-        m_Camera.SetFov(fov);
+        const XMVECTOR cameraForward = XMVectorSet(
+            0.0f,
+            0.0f,
+            e.WheelDelta * m_MouseWheelDollySpeed,
+            0.0f);
+        m_Camera.Translate(cameraForward, Space::Local);
         ResetAccumulation();
     }
 }
@@ -623,7 +665,7 @@ void RaytracingDemo::OnResize(ResizeEventArgs& e)
     ResetAccumulation();
 
     const float aspectRatio = static_cast<float>(m_Width) / static_cast<float>(m_Height);
-    m_Camera.SetProjection(45.0f, aspectRatio, 0.1f, 1000.0f);
+    m_Camera.SetProjection(m_CameraFov, aspectRatio, 0.1f, 1000.0f);
 
     if (m_RenderGraph != nullptr)
     {

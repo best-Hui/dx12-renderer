@@ -23,6 +23,16 @@ uint64_t Application::s_FrameCount = 0;
 
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
 
+//Modify Begin:2026-07-21 by BestHui
+#if defined(DX12_RENDERER_ENABLE_D3D12_AGILITY_PREVIEW) && DX12_RENDERER_ENABLE_D3D12_AGILITY_PREVIEW
+extern "C"
+{
+    __declspec(dllexport) extern const UINT D3D12SDKVersion = 720;
+    __declspec(dllexport) extern const char* D3D12SDKPath = ".\\D3D12\\";
+}
+#endif
+//Modify End
+
 // A wrapper struct to allow shared pointers for the window class.
 // This is needed because the constructor and destructor for the Window
 // class are protected and not accessible by the std::make_shared method.
@@ -33,9 +43,19 @@ struct MakeWindow : public Window
     {}
 };
 
+//Modify Begin:2026-07-21 by BestHui
 Application::Application(HINSTANCE hInst)
+    : Application(hInst, nullptr)
+{
+}
+
+Application::Application(HINSTANCE hInst, const ExternalD3D12Context* externalContext)
+//Modify End
     : m_hInstance(hInst)
     , m_TearingSupported(false)
+//Modify Begin:2026-07-21 by BestHui
+    , m_UsesExternalDevice(externalContext != nullptr && externalContext->Device != nullptr)
+//Modify End
 {
     // Windows 10 Creators update adds Per Monitor V2 DPI awareness context.
     // Using this awareness context allows the client area of the window
@@ -62,9 +82,18 @@ Application::Application(HINSTANCE hInst)
     }
 }
 
-void Application::Initialize()
+//Modify Begin:2026-07-21 by BestHui
+void Application::Initialize(const ExternalD3D12Context* externalContext)
+//Modify End
 {
+//Modify Begin:2026-07-21 by BestHui
+    const bool useExternalDevice = externalContext != nullptr && externalContext->Device != nullptr;
+//Modify End
 #if defined(_DEBUG)
+//Modify Begin:2026-07-21 by BestHui
+    if (!useExternalDevice)
+    {
+//Modify End
     // Always enable the debug layer before doing anything DX12 related
     // so all possible errors generated while creating DX12 objects
     // are caught by the debug layer.
@@ -74,27 +103,45 @@ void Application::Initialize()
     // Enable these if you want full validation (will slow down rendering a lot).
     //debugInterface->SetEnableGPUBasedValidation(TRUE);
     //debugInterface->SetEnableSynchronizedCommandQueueValidation(TRUE);
+//Modify Begin:2026-07-21 by BestHui
+    }
+//Modify End
 #endif
 
-    auto dxgiAdapter = GetAdapter(false);
-    if (!dxgiAdapter)
+//Modify Begin:2026-07-21 by BestHui
+    if (useExternalDevice)
     {
-        // If no supporting DX12 adapters exist, fall back to WARP
-        dxgiAdapter = GetAdapter(true);
-    }
-
-    if (dxgiAdapter)
-    {
-        m_d3d12Device = CreateDevice(dxgiAdapter);
+        ThrowIfFailed(externalContext->Device->QueryInterface(IID_PPV_ARGS(&m_d3d12Device)));
     }
     else
     {
-        throw std::exception("DXGI adapter enumeration failed.");
+        auto dxgiAdapter = GetAdapter(false);
+        if (!dxgiAdapter)
+        {
+            // If no supporting DX12 adapters exist, fall back to WARP
+            dxgiAdapter = GetAdapter(true);
+        }
+
+        if (dxgiAdapter)
+        {
+            m_d3d12Device = CreateDevice(dxgiAdapter);
+        }
+        else
+        {
+            throw std::exception("DXGI adapter enumeration failed.");
+        }
     }
 
-    m_DirectCommandQueue = std::make_shared<CommandQueue>(D3D12_COMMAND_LIST_TYPE_DIRECT);
-    m_ComputeCommandQueue = std::make_shared<CommandQueue>(D3D12_COMMAND_LIST_TYPE_COMPUTE);
-    m_CopyCommandQueue = std::make_shared<CommandQueue>(D3D12_COMMAND_LIST_TYPE_COPY);
+    m_DirectCommandQueue = externalContext != nullptr && externalContext->DirectCommandQueue != nullptr
+        ? std::make_shared<CommandQueue>(D3D12_COMMAND_LIST_TYPE_DIRECT, externalContext->DirectCommandQueue)
+        : std::make_shared<CommandQueue>(D3D12_COMMAND_LIST_TYPE_DIRECT);
+    m_ComputeCommandQueue = externalContext != nullptr && externalContext->ComputeCommandQueue != nullptr
+        ? std::make_shared<CommandQueue>(D3D12_COMMAND_LIST_TYPE_COMPUTE, externalContext->ComputeCommandQueue)
+        : std::make_shared<CommandQueue>(D3D12_COMMAND_LIST_TYPE_COMPUTE);
+    m_CopyCommandQueue = externalContext != nullptr && externalContext->CopyCommandQueue != nullptr
+        ? std::make_shared<CommandQueue>(D3D12_COMMAND_LIST_TYPE_COPY, externalContext->CopyCommandQueue)
+        : std::make_shared<CommandQueue>(D3D12_COMMAND_LIST_TYPE_COPY);
+//Modify End
 
     m_TearingSupported = CheckTearingSupport();
 
@@ -120,6 +167,18 @@ void Application::Create(HINSTANCE hInst)
         gs_pSingelton->Initialize();
     }
 }
+
+//Modify Begin:2026-07-21 by BestHui
+void Application::Create(HINSTANCE hInst, const ExternalD3D12Context& externalContext)
+{
+    Assert(externalContext.Device != nullptr, "External D3D12 device is required.");
+    if (!gs_pSingelton)
+    {
+        gs_pSingelton = new Application(hInst, &externalContext);
+        gs_pSingelton->Initialize(&externalContext);
+    }
+}
+//Modify End
 
 Application& Application::Get()
 {
@@ -404,6 +463,13 @@ Microsoft::WRL::ComPtr<ID3D12Device2> Application::GetDevice() const
 {
     return m_d3d12Device;
 }
+
+//Modify Begin:2026-07-21 by BestHui
+bool Application::UsesExternalDevice() const
+{
+    return m_UsesExternalDevice;
+}
+//Modify End
 
 std::shared_ptr<CommandQueue> Application::GetCommandQueue(D3D12_COMMAND_LIST_TYPE type) const
 {

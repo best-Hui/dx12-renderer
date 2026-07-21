@@ -12,6 +12,10 @@
 #include "ShaderResourceView.h"
 #include "UnorderedAccessView.h"
 
+//Modify Begin:2026-07-21 by BestHui
+class RayTracingAccelerationStructure;
+//Modify End
+
 class CommonRootSignature final : public RootSignature
 {
 public:
@@ -67,6 +71,10 @@ public:
 
     void SetComputeShaderResourceView(CommandList& commandList, UINT index, const ShaderResourceView& srv) const;
 
+//Modify Begin:2026-07-21 by BestHui
+    void SetComputeAccelerationStructure(CommandList& commandList, const RayTracingAccelerationStructure& accelerationStructure) const;
+//Modify End
+
     void SetUnorderedAccessView(CommandList& commandList, UINT index, const UnorderedAccessView& uav) const;
 
     void UnbindMaterialShaderResourceViews(CommandList& commandList);
@@ -75,6 +83,10 @@ public:
     static constexpr UINT MODEL_REGISTER_SPACE = 1u;
     static constexpr UINT PIPELINE_REGISTER_SPACE = 2u;
     static constexpr UINT CONSTANTS_REGISTER_SPACE = 3u;
+//Modify Begin:2026-07-21 by BestHui
+    static constexpr UINT INLINE_RAYTRACING_REGISTER_SPACE = 4u;
+    static constexpr UINT INLINE_RAYTRACING_ACCELERATION_STRUCTURE_REGISTER = 0u;
+//Modify End
 
     struct RootParameters
     {
@@ -91,6 +103,10 @@ public:
             PipelineSRVs,
 
             UAVs,
+
+//Modify Begin:2026-07-21 by BestHui
+            ComputeAccelerationStructure,
+//Modify End
 
             NumRootParameters,
         };

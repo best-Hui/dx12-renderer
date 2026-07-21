@@ -117,6 +117,11 @@ void RayTracingAccelerationStructure::Update(CommandList& commandList)
     BuildTopLevelAccelerationStructure(commandList, CreateMeshToBlasIndex(), true);
 }
 
+bool RayTracingAccelerationStructure::IsBuilt() const
+{
+    return m_TopLevelAccelerationStructure != nullptr;
+}
+
 D3D12_GPU_VIRTUAL_ADDRESS RayTracingAccelerationStructure::GetGpuVirtualAddress() const
 {
     return m_TopLevelAccelerationStructure->GetGPUVirtualAddress();

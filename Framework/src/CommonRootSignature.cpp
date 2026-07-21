@@ -1,10 +1,15 @@
 #include "CommonRootSignature.h"
 #include <DX12Library/Helpers.h>
 #include <DX12Library/StructuredBuffer.h>
+//Modify Begin:2026-07-21 by BestHui
+#include <Framework/RayTracingAccelerationStructure.h>
+//Modify End
 
 namespace
 {
-    constexpr UINT PIPELINE_SRVS_COUNT = 32;
+//Modify Begin:2026-07-21 by BestHui
+    constexpr UINT PIPELINE_SRVS_COUNT = 1024;
+//Modify End
     constexpr UINT MATERIAL_SRVS_COUNT = 6;
     constexpr UINT UAVS_COUNT = 6;
 }
@@ -45,6 +50,14 @@ CommonRootSignature::CommonRootSignature(const std::shared_ptr<Resource>& emptyR
     DescriptorRange uavsRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, UAVS_COUNT, 0u, 0u, D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE);
     rootParameters[RootParameters::UAVs].InitAsDescriptorTable(1, &uavsRange, D3D12_SHADER_VISIBILITY_ALL);
 
+    //Modify Begin:2026-07-21 by BestHui
+    rootParameters[RootParameters::ComputeAccelerationStructure].InitAsShaderResourceView(
+        INLINE_RAYTRACING_ACCELERATION_STRUCTURE_REGISTER,
+        INLINE_RAYTRACING_REGISTER_SPACE,
+        D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE,
+        D3D12_SHADER_VISIBILITY_ALL);
+    //Modify End
+
     CombineRootSignatureFlags(rootSignatureFlags, rootParameters);
 
     const StaticSampler staticSamples[] =
@@ -59,10 +72,12 @@ CommonRootSignature::CommonRootSignature(const std::shared_ptr<Resource>& emptyR
     };
 
     CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDescription;
+    //Modify Begin:2026-07-21 by BestHui
     rootSignatureDescription.Init_1_1(
-        rootParameters.size(), rootParameters.data(),
+        static_cast<UINT>(rootParameters.size()), rootParameters.data(),
         _countof(staticSamples), staticSamples,
         rootSignatureFlags);
+    //Modify End
 
     this->SetRootSignatureDesc(rootSignatureDescription.Desc_1_1, featureData.HighestVersion);
 
@@ -207,6 +222,16 @@ void CommonRootSignature::SetComputeShaderResourceView(CommandList& commandList,
         );
     }
 }
+
+//Modify Begin:2026-07-21 by BestHui
+void CommonRootSignature::SetComputeAccelerationStructure(CommandList& commandList, const RayTracingAccelerationStructure& accelerationStructure) const
+{
+    Assert(accelerationStructure.IsBuilt(), "Ray tracing acceleration structure is not built.");
+    commandList.SetComputeRootShaderResourceView(
+        RootParameters::ComputeAccelerationStructure,
+        accelerationStructure.GetGpuVirtualAddress());
+}
+//Modify End
 
 void CommonRootSignature::SetUnorderedAccessView(CommandList& commandList, UINT index, const UnorderedAccessView& uav) const
 {

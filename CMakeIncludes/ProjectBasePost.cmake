@@ -2,6 +2,12 @@ target_include_directories(${TARGET_NAME}
         PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include"
         )
 
+# Modify Begin:2026-07-21 by BestHui
+target_include_directories(${TARGET_NAME}
+        PUBLIC "${CMAKE_SOURCE_DIR}/Shaders"
+        )
+# Modify End
+
 if (${SHADERS_OUTPUT_HEADERS}) 
     # add shader headers to include directories
     target_include_directories(${TARGET_NAME}

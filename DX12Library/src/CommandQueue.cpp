@@ -20,9 +20,29 @@ CommandQueue::CommandQueue(D3D12_COMMAND_LIST_TYPE type)
 	desc.NodeMask = 0;
 
 	ThrowIfFailed(device->CreateCommandQueue(&desc, IID_PPV_ARGS(&m_D3d12CommandQueue)));
+//Modify Begin:2026-07-21 by BestHui
+	InitializeFenceAndWorker();
+//Modify End
+}
+
+//Modify Begin:2026-07-21 by BestHui
+CommandQueue::CommandQueue(D3D12_COMMAND_LIST_TYPE type, ID3D12CommandQueue* externalCommandQueue)
+	: m_CommandListType(type)
+	, m_D3d12CommandQueue(externalCommandQueue)
+	, m_FenceValue(0)
+	, m_IsProcessingInFlightCommandLists(true)
+{
+	Assert(m_D3d12CommandQueue != nullptr, "External command queue is null.");
+	Assert(m_D3d12CommandQueue->GetDesc().Type == type, "External command queue type does not match the wrapper type.");
+	InitializeFenceAndWorker();
+}
+
+void CommandQueue::InitializeFenceAndWorker()
+{
+	auto device = Application::Get().GetDevice();
 	ThrowIfFailed(device->CreateFence(m_FenceValue, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_D3d12Fence)));
 
-	switch (type)
+	switch (m_CommandListType)
 	{
 	case D3D12_COMMAND_LIST_TYPE_COPY:
 		m_D3d12CommandQueue->SetName(L"Copy Command Queue");
@@ -37,6 +57,7 @@ CommandQueue::CommandQueue(D3D12_COMMAND_LIST_TYPE type)
 
 	m_ProcessInFlightCommandListsThread = std::thread(&CommandQueue::ProcessInFlightCommandLists, this);
 }
+//Modify End
 
 CommandQueue::~CommandQueue()
 {

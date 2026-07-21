@@ -3,10 +3,12 @@
 #include <RaytracingDemo.h>
 
 #include <DX12Library/CommandList.h>
+#include <DX12Library/Helpers.h>
 #include <DX12Library/Texture.h>
 #include <DX12Library/Window.h>
 #include <Framework/Mesh.h>
 #include <Framework/ShaderResourceView.h>
+#include <Framework/UnorderedAccessView.h>
 
 #include <d3dx12.h>
 
@@ -23,6 +25,17 @@ namespace
     constexpr DXGI_FORMAT ACCUMULATION_FORMAT = DXGI_FORMAT_R32G32B32A32_FLOAT;
     constexpr DXGI_FORMAT DEPTH_FORMAT = DXGI_FORMAT_D32_FLOAT;
     constexpr DXGI_FORMAT OUTPUT_FORMAT = DXGI_FORMAT_R8G8B8A8_UNORM;
+    constexpr uint32_t INLINE_SRV_GBUFFER_BASE_COLOR = 0;
+    constexpr uint32_t INLINE_SRV_GBUFFER_SPECULAR = 1;
+    constexpr uint32_t INLINE_SRV_GBUFFER_NORMAL_ROUGHNESS = 2;
+    constexpr uint32_t INLINE_SRV_GBUFFER_POSITION_METALLIC = 3;
+    constexpr uint32_t INLINE_SRV_SKYBOX = 4;
+    constexpr uint32_t INLINE_SRV_MATERIALS = 5;
+    constexpr uint32_t INLINE_SRV_GEOMETRIES = 6;
+    constexpr uint32_t INLINE_SRV_TEXTURES_BEGIN = 7;
+    constexpr uint32_t INLINE_SRV_VERTEX_BUFFERS_BEGIN = 15;
+    constexpr uint32_t INLINE_SRV_INDEX_BUFFERS_BEGIN =
+        INLINE_SRV_VERTEX_BUFFERS_BEGIN + RaytracingDemo::MaxInlineRayTracingGeometryBuffers;
 
     class RaytracingDemoResourceIds
     {
@@ -179,11 +192,68 @@ std::unique_ptr<RenderGraph::RenderGraphRoot> RenderGraph::User::Create(Raytraci
             camera.Height = context.m_Metadata.m_ScreenHeight;
             camera.FrameIndex = static_cast<uint32_t>(context.m_Metadata.m_FrameIndex);
 
-            demo.m_RayTracingShader->SetOutputTexture("Output", output);
-            demo.m_RayTracingShader->SetOutputTexture("Accumulation", accumulation);
-            demo.m_RayTracingShader->SetTextureArray("GBufferTextures", gBufferTextures);
-            demo.m_RayTracingShader->SetConstantBufferData("CameraConstants", &camera, sizeof(camera));
-            demo.m_RayTracingShader->Dispatch(cmd, "RayGen", camera.Width, camera.Height);
+            if (demo.m_RayTracingExecutionMode == RaytracingDemo::RayTracingExecutionMode::InlineRayTracing)
+            {
+                Assert(demo.m_Textures.size() <= RaytracingDemo::MaxInlineRayTracingTextures, "Inline ray tracing texture count exceeds the fixed descriptor layout.");
+                Assert(demo.m_RayTracingAccelerationStructure.GetMeshes().size() <= RaytracingDemo::MaxInlineRayTracingGeometryBuffers, "Inline ray tracing mesh count exceeds the fixed descriptor layout.");
+
+                demo.m_RootSignature->Bind(cmd);
+                demo.m_RootSignature->SetComputeConstantBuffer(cmd, sizeof(camera), &camera);
+                demo.m_RootSignature->SetComputeAccelerationStructure(cmd, demo.m_RayTracingAccelerationStructure);
+                demo.m_RootSignature->SetPipelineShaderResourceView(cmd, INLINE_SRV_GBUFFER_BASE_COLOR, ShaderResourceView(baseColor));
+                demo.m_RootSignature->SetPipelineShaderResourceView(cmd, INLINE_SRV_GBUFFER_SPECULAR, ShaderResourceView(specular));
+                demo.m_RootSignature->SetPipelineShaderResourceView(cmd, INLINE_SRV_GBUFFER_NORMAL_ROUGHNESS, ShaderResourceView(normalRoughness));
+                demo.m_RootSignature->SetPipelineShaderResourceView(cmd, INLINE_SRV_GBUFFER_POSITION_METALLIC, ShaderResourceView(positionMetallic));
+                demo.m_RootSignature->SetPipelineShaderResourceView(cmd, INLINE_SRV_SKYBOX, ShaderResourceView(demo.m_SkyboxTexture, CreateSkyboxSrvDesc(*demo.m_SkyboxTexture)));
+                cmd.SetShaderResourceView(
+                    CommonRootSignature::RootParameters::PipelineSRVs,
+                    INLINE_SRV_MATERIALS,
+                    demo.m_MaterialBuffer,
+                    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                cmd.SetShaderResourceView(
+                    CommonRootSignature::RootParameters::PipelineSRVs,
+                    INLINE_SRV_GEOMETRIES,
+                    demo.m_GeometryBuffer,
+                    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+
+                for (uint32_t textureIndex = 0; textureIndex < std::min<uint32_t>(static_cast<uint32_t>(demo.m_Textures.size()), RaytracingDemo::MaxInlineRayTracingTextures); ++textureIndex)
+                {
+                    demo.m_RootSignature->SetPipelineShaderResourceView(
+                        cmd,
+                        INLINE_SRV_TEXTURES_BEGIN + textureIndex,
+                        ShaderResourceView(demo.m_Textures[textureIndex]));
+                }
+
+                const std::vector<std::shared_ptr<Mesh>>& meshes = demo.m_RayTracingAccelerationStructure.GetMeshes();
+                const uint32_t meshCount = std::min<uint32_t>(static_cast<uint32_t>(meshes.size()), RaytracingDemo::MaxInlineRayTracingGeometryBuffers);
+                for (uint32_t meshIndex = 0; meshIndex < meshCount; ++meshIndex)
+                {
+                    const Mesh& mesh = *meshes[meshIndex];
+                    cmd.SetShaderResourceView(
+                        CommonRootSignature::RootParameters::PipelineSRVs,
+                        INLINE_SRV_VERTEX_BUFFERS_BEGIN + meshIndex,
+                        mesh.GetVertexBuffer(),
+                        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                    cmd.SetShaderResourceView(
+                        CommonRootSignature::RootParameters::PipelineSRVs,
+                        INLINE_SRV_INDEX_BUFFERS_BEGIN + meshIndex,
+                        mesh.GetIndexBuffer(),
+                        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                }
+
+                demo.m_RootSignature->SetUnorderedAccessView(cmd, 0, UnorderedAccessView(output));
+                demo.m_RootSignature->SetUnorderedAccessView(cmd, 1, UnorderedAccessView(accumulation));
+                demo.m_InlineRayTracingShader->Bind(cmd);
+                cmd.Dispatch((camera.Width + 7u) / 8u, (camera.Height + 7u) / 8u, 1u);
+            }
+            else
+            {
+                demo.m_RayTracingShader->SetOutputTexture("Output", output);
+                demo.m_RayTracingShader->SetOutputTexture("Accumulation", accumulation);
+                demo.m_RayTracingShader->SetTextureArray("GBufferTextures", gBufferTextures);
+                demo.m_RayTracingShader->SetConstantBufferData("CameraConstants", &camera, sizeof(camera));
+                demo.m_RayTracingShader->Dispatch(cmd, "RayGen", camera.Width, camera.Height);
+            }
         }));
 
     renderPasses.emplace_back(RenderPass::Create(

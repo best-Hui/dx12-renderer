@@ -31,6 +31,9 @@
   */
 
 #include "Buffer.h"
+//Modify Begin:2026-07-21 by BestHui
+#include "DescriptorAllocation.h"
+//Modify End
 
 class IndexBuffer : public Buffer
 {
@@ -77,4 +80,7 @@ private:
 	DXGI_FORMAT IndexFormat;
 
 	D3D12_INDEX_BUFFER_VIEW IndexBufferView;
+//Modify Begin:2026-07-21 by BestHui
+	DescriptorAllocation m_Srv;
+//Modify End
 };

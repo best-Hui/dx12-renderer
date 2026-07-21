@@ -48,6 +48,9 @@ class CommandQueue
 {
 public:
 	CommandQueue(D3D12_COMMAND_LIST_TYPE type);
+//Modify Begin:2026-07-21 by BestHui
+	CommandQueue(D3D12_COMMAND_LIST_TYPE type, ID3D12CommandQueue* externalCommandQueue);
+//Modify End
 	virtual ~CommandQueue();
 
 	// Get an available command list from the command queue.
@@ -69,6 +72,9 @@ public:
 	Microsoft::WRL::ComPtr<ID3D12CommandQueue> GetD3D12CommandQueue() const;
 
 private:
+//Modify Begin:2026-07-21 by BestHui
+	void InitializeFenceAndWorker();
+//Modify End
 	// Free any command lists that are finished processing on the command queue.
 	void ProcessInFlightCommandLists();
 

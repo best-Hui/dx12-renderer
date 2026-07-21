@@ -32,6 +32,9 @@
 
 
 #include "Buffer.h"
+//Modify Begin:2026-07-21 by BestHui
+#include "DescriptorAllocation.h"
+//Modify End
 
 class VertexBuffer : public Buffer
 {
@@ -78,4 +81,7 @@ private:
 	size_t VertexStride;
 
 	D3D12_VERTEX_BUFFER_VIEW VertexBufferView;
+//Modify Begin:2026-07-21 by BestHui
+	DescriptorAllocation m_Srv;
+//Modify End
 };

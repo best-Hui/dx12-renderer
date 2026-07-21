@@ -226,14 +226,17 @@ void Window::UpdateFrameStatistics(const double elapsedSeconds)
 	const double frameMilliseconds = fps > 0.0 ? 1000.0 / fps : 0.0;
 
 	wchar_t title[256] = {};
-	std::swprintf(
+	const int written = swprintf_s(
 		title,
-		sizeof(title) / sizeof(title[0]),
-		L"%ls - %.1f FPS (%.2f ms)",
+		_countof(title),
+		L"%s - %.1f FPS (%.2f ms)",
 		WindowName.c_str(),
 		fps,
 		frameMilliseconds);
-	SetWindowTextW(HWnd, title);
+	if (written > 0)
+	{
+		SetWindowTextW(HWnd, title);
+	}
 
 	FrameStatisticsElapsedSeconds = 0.0;
 	FrameStatisticsCount = 0;
