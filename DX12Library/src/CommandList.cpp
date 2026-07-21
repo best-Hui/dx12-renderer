@@ -43,8 +43,13 @@ CommandList::CommandList(D3D12_COMMAND_LIST_TYPE type) : m_D3d12CommandListType(
 
     for (int i = 0; i < D3D12_DESCRIPTOR_HEAP_TYPE_NUM_TYPES; ++i)
     {
+//Modify Begin:2026-07-21 by BestHui
+        const uint32_t numDescriptorsPerHeap =
+            i == D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV ? 8192u : 1024u;
         m_DynamicDescriptorHeaps[i] = std::make_unique<DynamicDescriptorHeap>(
-            static_cast<D3D12_DESCRIPTOR_HEAP_TYPE>(i));
+            static_cast<D3D12_DESCRIPTOR_HEAP_TYPE>(i),
+            numDescriptorsPerHeap);
+//Modify End
         m_DescriptorHeaps[i] = nullptr;
     }
 }
@@ -910,6 +915,57 @@ void CommandList::SetUnorderedAccessView(const uint32_t rootParameterIndex, cons
     TrackResource(resource);
 }
 
+//Modify Begin:2026-07-21 by BestHui
+void CommandList::SetGlobalTexture(
+    const uint32_t rootParameterIndex,
+    const uint32_t descriptorOffset,
+    const Resource& texture,
+    const UINT firstSubresource,
+    const UINT numSubresources,
+    const D3D12_SHADER_RESOURCE_VIEW_DESC* srv)
+{
+    SetShaderResourceView(
+        rootParameterIndex,
+        descriptorOffset,
+        texture,
+        D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE,
+        firstSubresource,
+        numSubresources,
+        srv);
+}
+
+void CommandList::SetGlobalTexture(
+    const uint32_t rootParameterIndex,
+    const Resource& texture,
+    const UINT firstSubresource,
+    const UINT numSubresources,
+    const D3D12_SHADER_RESOURCE_VIEW_DESC* srv)
+{
+    SetGlobalTexture(rootParameterIndex, 0, texture, firstSubresource, numSubresources, srv);
+}
+
+void CommandList::SetTexture(
+    const uint32_t rootParameterIndex,
+    const uint32_t descriptorOffset,
+    const Resource& texture,
+    const UINT firstSubresource,
+    const UINT numSubresources,
+    const D3D12_SHADER_RESOURCE_VIEW_DESC* srv)
+{
+    SetGlobalTexture(rootParameterIndex, descriptorOffset, texture, firstSubresource, numSubresources, srv);
+}
+
+void CommandList::SetTexture(
+    const uint32_t rootParameterIndex,
+    const Resource& texture,
+    const UINT firstSubresource,
+    const UINT numSubresources,
+    const D3D12_SHADER_RESOURCE_VIEW_DESC* srv)
+{
+    SetGlobalTexture(rootParameterIndex, 0, texture, firstSubresource, numSubresources, srv);
+}
+//Modify End
+
 void CommandList::SetStencilRef(UINT8 stencilRef)
 {
     m_D3d12CommandList->OMSetStencilRef(stencilRef);
@@ -1066,6 +1122,12 @@ void CommandList::SetRaytracingPipelineState(const ComPtr<ID3D12StateObject>& st
 void CommandList::DispatchRays(const D3D12_DISPATCH_RAYS_DESC& dispatchRaysDesc)
 {
     FlushResourceBarriers();
+
+    for (const auto& dynamicDescriptorHeap : m_DynamicDescriptorHeaps)
+    {
+        dynamicDescriptorHeap->CommitStagedDescriptorsForDispatch(*this);
+    }
+
     m_D3d12CommandList5->DispatchRays(&dispatchRaysDesc);
 }
 
@@ -1073,6 +1135,16 @@ void CommandList::BuildRaytracingAccelerationStructure(const D3D12_BUILD_RAYTRAC
 {
     FlushResourceBarriers();
     m_D3d12CommandList5->BuildRaytracingAccelerationStructure(&buildDesc, 0, nullptr);
+}
+
+void CommandList::StageDynamicDescriptors(
+    const D3D12_DESCRIPTOR_HEAP_TYPE heapType,
+    const UINT rootParameterIndex,
+    const UINT descriptorOffset,
+    const UINT numDescriptors,
+    const D3D12_CPU_DESCRIPTOR_HANDLE srcDescriptor)
+{
+    m_DynamicDescriptorHeaps[heapType]->StageDescriptors(rootParameterIndex, descriptorOffset, numDescriptors, srcDescriptor);
 }
 //Modify End
 

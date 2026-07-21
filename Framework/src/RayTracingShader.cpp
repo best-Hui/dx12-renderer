@@ -3,46 +3,50 @@
 
 #include <DX12Library/Application.h>
 #include <DX12Library/CommandList.h>
+#include <DX12Library/DescriptorAllocation.h>
 #include <DX12Library/Helpers.h>
-#include <DX12Library/RootSignature.h>
 #include <DX12Library/StructuredBuffer.h>
 #include <DX12Library/Texture.h>
 #include <Framework/Mesh.h>
+#include <Framework/RayTracingPipelineStateBuilder.h>
 #include <Framework/ShaderBlob.h>
 
 #include <d3dx12.h>
 
+#include <algorithm>
 #include <cstring>
+#include <map>
+#include <unordered_map>
+
+#if defined(min)
+#undef min
+#endif
+
+#if defined(max)
+#undef max
+#endif
 
 using Microsoft::WRL::ComPtr;
 
 namespace
 {
-    constexpr uint32_t MaxDescriptorCount = 2048;
-    constexpr uint32_t OutputDescriptorIndex = 0;
-    constexpr LPCWSTR RayGenerationShaderName = L"RayGen";
-    constexpr LPCWSTR MissShaderName = L"Miss";
-    constexpr LPCWSTR ClosestHitShaderName = L"ClosestHit";
-    constexpr LPCWSTR HitGroupName = L"HitGroup";
+    constexpr LPCWSTR DefaultRayGenerationShaderName = L"RayGen";
+    constexpr LPCWSTR DefaultMissShaderName = L"Miss";
+    constexpr LPCWSTR DefaultClosestHitShaderName = L"ClosestHit";
+    constexpr LPCWSTR DefaultHitGroupName = L"HitGroup";
 
-    enum RootParameters
+    bool IsDescriptorTableBinding(const RayTracingShaderBindingType type)
     {
-        Output,
-        AccelerationStructure,
-        Camera,
-        Materials,
-        Geometries,
-        VertexBuffers,
-        IndexBuffers,
-        Textures,
-        Count
-    };
-
-    ComPtr<ID3D12Device5> GetDxrDevice()
-    {
-        ComPtr<ID3D12Device5> device5;
-        ThrowIfFailed(Application::Get().GetDevice().As(&device5));
-        return device5;
+        switch (type)
+        {
+        case RayTracingShaderBindingType::OutputTexture:
+        case RayTracingShaderBindingType::TextureArray:
+        case RayTracingShaderBindingType::VertexBufferArray:
+        case RayTracingShaderBindingType::IndexBufferArray:
+            return true;
+        default:
+            return false;
+        }
     }
 
     D3D12_SHADER_RESOURCE_VIEW_DESC CreateVertexBufferSrvDesc(const VertexBuffer& vertexBuffer)
@@ -101,17 +105,31 @@ namespace
         return desc;
     }
 
+    struct ShaderRecord
+    {
+        const void* ShaderIdentifier = nullptr;
+        std::vector<uint8_t> LocalRootArguments;
+    };
+
     class ShaderTable
     {
     public:
         void Reset(
             const ComPtr<ID3D12Device>& device,
-            const std::vector<const void*>& shaderIdentifiers,
+            const std::vector<ShaderRecord>& shaderRecords,
             const uint32_t shaderIdentifierSize,
             const wchar_t* name)
         {
-            m_StrideInBytes = Math::AlignUp(shaderIdentifierSize, D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT);
-            m_SizeInBytes = static_cast<uint64_t>(m_StrideInBytes) * shaderIdentifiers.size();
+            uint32_t maxRecordSize = shaderIdentifierSize;
+            for (const ShaderRecord& record : shaderRecords)
+            {
+                maxRecordSize = std::max<uint32_t>(
+                    maxRecordSize,
+                    shaderIdentifierSize + static_cast<uint32_t>(record.LocalRootArguments.size()));
+            }
+
+            m_StrideInBytes = Math::AlignUp(maxRecordSize, D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT);
+            m_SizeInBytes = static_cast<uint64_t>(m_StrideInBytes) * shaderRecords.size();
 
             const auto heapProperties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
             const auto resourceDesc = CD3DX12_RESOURCE_DESC::Buffer(m_SizeInBytes);
@@ -131,9 +149,15 @@ namespace
             uint8_t* mappedData = nullptr;
             ThrowIfFailed(m_Resource->Map(0, nullptr, reinterpret_cast<void**>(&mappedData)));
 
-            for (size_t i = 0; i < shaderIdentifiers.size(); ++i)
+            for (size_t i = 0; i < shaderRecords.size(); ++i)
             {
-                std::memcpy(mappedData + i * m_StrideInBytes, shaderIdentifiers[i], shaderIdentifierSize);
+                const ShaderRecord& record = shaderRecords[i];
+                uint8_t* recordData = mappedData + i * m_StrideInBytes;
+                std::memcpy(recordData, record.ShaderIdentifier, shaderIdentifierSize);
+                if (!record.LocalRootArguments.empty())
+                {
+                    std::memcpy(recordData + shaderIdentifierSize, record.LocalRootArguments.data(), record.LocalRootArguments.size());
+                }
             }
 
             m_Resource->Unmap(0, nullptr);
@@ -160,260 +184,289 @@ namespace
         uint32_t m_StrideInBytes = 0;
     };
 
-    class RayTracingPipeline
-    {
-    public:
-        explicit RayTracingPipeline(const D3D12_SHADER_BYTECODE& shaderLibrary)
-        {
-            CreateGlobalRootSignature();
-            CreateStateObject(shaderLibrary);
-        }
-
-        RootSignature& GetGlobalRootSignature()
-        {
-            return *m_GlobalRootSignature;
-        }
-
-        const ComPtr<ID3D12StateObject>& GetStateObject() const
-        {
-            return m_StateObject;
-        }
-
-        const void* GetRayGenerationShaderIdentifier() const
-        {
-            return m_StateObjectProperties->GetShaderIdentifier(RayGenerationShaderName);
-        }
-
-        const void* GetMissShaderIdentifier() const
-        {
-            return m_StateObjectProperties->GetShaderIdentifier(MissShaderName);
-        }
-
-        const void* GetHitGroupShaderIdentifier() const
-        {
-            return m_StateObjectProperties->GetShaderIdentifier(HitGroupName);
-        }
-
-    private:
-        void CreateGlobalRootSignature()
-        {
-            using RootParameter = CD3DX12_ROOT_PARAMETER1;
-            using DescriptorRange = CD3DX12_DESCRIPTOR_RANGE1;
-            using StaticSampler = CD3DX12_STATIC_SAMPLER_DESC;
-
-            DescriptorRange outputRange;
-            outputRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0, 0);
-
-            DescriptorRange vertexBufferRange;
-            vertexBufferRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, MaxDescriptorCount, 0, 1);
-
-            DescriptorRange indexBufferRange;
-            indexBufferRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, MaxDescriptorCount, 0, 2);
-
-            DescriptorRange textureRange;
-            textureRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, MaxDescriptorCount, 0, 3);
-
-            RootParameter rootParameters[RootParameters::Count];
-            rootParameters[RootParameters::Output].InitAsDescriptorTable(1, &outputRange);
-            rootParameters[RootParameters::AccelerationStructure].InitAsShaderResourceView(0, 0);
-            rootParameters[RootParameters::Camera].InitAsConstantBufferView(0, 0);
-            rootParameters[RootParameters::Materials].InitAsShaderResourceView(1, 0);
-            rootParameters[RootParameters::Geometries].InitAsShaderResourceView(2, 0);
-            rootParameters[RootParameters::VertexBuffers].InitAsDescriptorTable(1, &vertexBufferRange);
-            rootParameters[RootParameters::IndexBuffers].InitAsDescriptorTable(1, &indexBufferRange);
-            rootParameters[RootParameters::Textures].InitAsDescriptorTable(1, &textureRange);
-
-            StaticSampler staticSampler(0, D3D12_FILTER_MIN_MAG_MIP_LINEAR);
-            staticSampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-            staticSampler.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-            staticSampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-
-            D3D12_ROOT_SIGNATURE_DESC1 desc1 = {};
-            desc1.NumParameters = RootParameters::Count;
-            desc1.pParameters = rootParameters;
-            desc1.NumStaticSamplers = 1;
-            desc1.pStaticSamplers = &staticSampler;
-            desc1.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
-
-            m_GlobalRootSignature = std::make_shared<RootSignature>(desc1, D3D_ROOT_SIGNATURE_VERSION_1_1);
-        }
-
-        void CreateStateObject(const D3D12_SHADER_BYTECODE& shaderLibrary)
-        {
-            const auto device = GetDxrDevice();
-
-            CD3DX12_STATE_OBJECT_DESC stateObjectDesc(D3D12_STATE_OBJECT_TYPE_RAYTRACING_PIPELINE);
-
-            auto dxilLibrary = stateObjectDesc.CreateSubobject<CD3DX12_DXIL_LIBRARY_SUBOBJECT>();
-            D3D12_SHADER_BYTECODE libraryBytecode = shaderLibrary;
-            dxilLibrary->SetDXILLibrary(&libraryBytecode);
-            dxilLibrary->DefineExport(RayGenerationShaderName);
-            dxilLibrary->DefineExport(MissShaderName);
-            dxilLibrary->DefineExport(ClosestHitShaderName);
-
-            auto hitGroup = stateObjectDesc.CreateSubobject<CD3DX12_HIT_GROUP_SUBOBJECT>();
-            hitGroup->SetHitGroupExport(HitGroupName);
-            hitGroup->SetClosestHitShaderImport(ClosestHitShaderName);
-            hitGroup->SetHitGroupType(D3D12_HIT_GROUP_TYPE_TRIANGLES);
-
-            auto shaderConfig = stateObjectDesc.CreateSubobject<CD3DX12_RAYTRACING_SHADER_CONFIG_SUBOBJECT>();
-            shaderConfig->Config(sizeof(float) * 8, sizeof(float) * 2);
-
-            auto globalRootSignature = stateObjectDesc.CreateSubobject<CD3DX12_GLOBAL_ROOT_SIGNATURE_SUBOBJECT>();
-            globalRootSignature->SetRootSignature(m_GlobalRootSignature->GetRootSignature().Get());
-
-            auto pipelineConfig = stateObjectDesc.CreateSubobject<CD3DX12_RAYTRACING_PIPELINE_CONFIG_SUBOBJECT>();
-            pipelineConfig->Config(1);
-
-            ThrowIfFailed(device->CreateStateObject(stateObjectDesc, IID_PPV_ARGS(&m_StateObject)));
-            ThrowIfFailed(m_StateObject.As(&m_StateObjectProperties));
-        }
-
-        std::shared_ptr<RootSignature> m_GlobalRootSignature;
-        ComPtr<ID3D12StateObject> m_StateObject;
-        ComPtr<ID3D12StateObjectProperties> m_StateObjectProperties;
-    };
 }
 
 struct RayTracingShader::Impl
 {
-    explicit Impl(const ShaderBlob& shaderLibrary)
-        : Pipeline(
-            D3D12_SHADER_BYTECODE{
-                shaderLibrary.GetBlob()->GetBufferPointer(),
-                shaderLibrary.GetBlob()->GetBufferSize()
-            })
+    Impl(const ShaderBlob& shaderLibrary, RayTracingPipelineDesc pipelineDesc)
+        : Desc(std::move(pipelineDesc))
+        , PipelineState(RayTracingPipelineStateBuilder(shaderLibrary, Desc).Build())
     {
-        BuildShaderTables();
+        Assert(!Desc.Bindings.empty(), "Ray tracing shader requires at least one binding.");
+        for (uint32_t i = 0; i < Desc.Bindings.size(); ++i)
+        {
+            const RayTracingShaderBindingDesc& binding = Desc.Bindings[i];
+            Assert(!binding.Name.empty(), "Ray tracing binding name must not be empty.");
+            BindingIndicesByName.emplace(binding.Name, i);
+        }
     }
 
-    void BuildShaderTables()
+    const RayTracingShaderBindingDesc& GetBinding(std::string_view name, RayTracingShaderBindingType expectedType) const
     {
+        const auto findResult = BindingIndicesByName.find(std::string(name));
+        Assert(findResult != BindingIndicesByName.end(), "Ray tracing shader binding was not found.");
+
+        const RayTracingShaderBindingDesc& binding = Desc.Bindings[findResult->second];
+        Assert(binding.Type == expectedType, "Ray tracing shader binding type does not match the setter.");
+        return binding;
+    }
+
+    uint32_t GetBindingIndex(const RayTracingShaderBindingDesc& binding) const
+    {
+        return static_cast<uint32_t>(&binding - Desc.Bindings.data());
+    }
+
+    void MarkDescriptorsDirty(const RayTracingShaderBindingDesc& binding)
+    {
+        if (IsDescriptorTableBinding(binding.Type))
+        {
+            DescriptorsDirty = true;
+        }
+    }
+
+    const RayTracingShaderPassDesc& ResolvePass(std::string_view passName)
+    {
+        if (Desc.Passes.empty())
+        {
+            DefaultPass.Name = std::string(passName);
+            DefaultPass.RayGenerationShader = std::wstring(passName.begin(), passName.end());
+            DefaultPass.MissShaderRecords = { { DefaultMissShaderName, {} } };
+            DefaultPass.HitGroupRecords = { { DefaultHitGroupName, {} } };
+            return DefaultPass;
+        }
+
+        const auto passFindResult = std::find_if(
+            Desc.Passes.begin(),
+            Desc.Passes.end(),
+            [passName](const RayTracingShaderPassDesc& pass)
+            {
+                return pass.Name == passName;
+            });
+
+        Assert(passFindResult != Desc.Passes.end(), "Ray tracing shader pass was not found.");
+        return *passFindResult;
+    }
+
+    std::vector<ShaderRecord> BuildShaderRecords(const std::vector<RayTracingShaderRecordDesc>& recordDescs)
+    {
+        std::vector<ShaderRecord> records;
+        records.reserve(recordDescs.size());
+        for (const RayTracingShaderRecordDesc& recordDesc : recordDescs)
+        {
+            const void* shaderIdentifier = PipelineState->GetShaderIdentifier(recordDesc.ExportName);
+            Assert(shaderIdentifier != nullptr, "Ray tracing shader identifier was not found.");
+            records.push_back({ shaderIdentifier, recordDesc.LocalRootArguments });
+        }
+        return records;
+    }
+
+    void BuildShaderTables(const RayTracingShaderPassDesc& pass)
+    {
+        if (CurrentPassName == pass.Name)
+        {
+            return;
+        }
+
         const auto device = Application::Get().GetDevice();
 
         RayGenerationShaderTable.Reset(
             device,
-            { Pipeline.GetRayGenerationShaderIdentifier() },
+            BuildShaderRecords({ { pass.RayGenerationShader, {} } }),
             D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES,
             L"Ray Generation Shader Table");
         MissShaderTable.Reset(
             device,
-            { Pipeline.GetMissShaderIdentifier() },
+            BuildShaderRecords(pass.MissShaderRecords),
             D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES,
             L"Miss Shader Table");
         HitGroupShaderTable.Reset(
             device,
-            { Pipeline.GetHitGroupShaderIdentifier() },
+            BuildShaderRecords(pass.HitGroupRecords),
             D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES,
             L"Hit Group Shader Table");
+
+        CurrentPassName = pass.Name;
     }
 
-    void RebuildDescriptorHeap()
+    void RebuildDescriptorAllocation()
     {
-        Assert(OutputTexture != nullptr, "Ray tracing output texture is not bound.");
-        Assert(AccelerationStructure != nullptr, "Ray tracing acceleration structure is not bound.");
-
         const auto device = Application::Get().GetDevice();
-        const std::vector<std::shared_ptr<Mesh>>& meshes = AccelerationStructure->GetMeshes();
-        const uint32_t meshCount = static_cast<uint32_t>(meshes.size());
-        const uint32_t textureCount = static_cast<uint32_t>(Textures.size());
 
-        Assert(meshCount <= MaxDescriptorCount, "Ray tracing scene uses more mesh descriptors than the root signature allows.");
-        Assert(textureCount <= MaxDescriptorCount, "Ray tracing shader uses more texture descriptors than the root signature allows.");
+        uint32_t descriptorCount = 0;
+        DescriptorTableOffsets.clear();
+        DescriptorTableOffsets.resize(Desc.Bindings.size(), UINT32_MAX);
+        for (uint32_t i = 0; i < Desc.Bindings.size(); ++i)
+        {
+            const RayTracingShaderBindingDesc& binding = Desc.Bindings[i];
+            if (IsDescriptorTableBinding(binding.Type))
+            {
+                DescriptorTableOffsets[i] = descriptorCount;
+                descriptorCount += std::max(1u, binding.DescriptorCount);
+            }
+        }
 
-        VertexBuffersDescriptorStart = 1;
-        IndexBuffersDescriptorStart = VertexBuffersDescriptorStart + MaxDescriptorCount;
-        TexturesDescriptorStart = IndexBuffersDescriptorStart + MaxDescriptorCount;
-
-        D3D12_DESCRIPTOR_HEAP_DESC heapDesc = {};
-        heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-        heapDesc.NumDescriptors = TexturesDescriptorStart + MaxDescriptorCount;
-        heapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-        ThrowIfFailed(device->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&DescriptorHeap)));
-
-        DescriptorSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+        const uint32_t requiredDescriptorCount = std::max(1u, descriptorCount);
+        if (DescriptorAllocation.IsNull() || DescriptorAllocation.GetNumHandles() < requiredDescriptorCount)
+        {
+            DescriptorAllocation = Application::Get().AllocateDescriptors(
+                D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
+                requiredDescriptorCount);
+        }
 
         const D3D12_SHADER_RESOURCE_VIEW_DESC nullVertexSrvDesc = CreateNullVertexBufferSrvDesc();
         const D3D12_SHADER_RESOURCE_VIEW_DESC nullIndexSrvDesc = CreateNullIndexBufferSrvDesc();
         const D3D12_SHADER_RESOURCE_VIEW_DESC nullTextureSrvDesc = CreateNullTextureSrvDesc();
-        for (uint32_t i = 0; i < MaxDescriptorCount; ++i)
+
+        for (uint32_t bindingIndex = 0; bindingIndex < Desc.Bindings.size(); ++bindingIndex)
         {
-            device->CreateShaderResourceView(nullptr, &nullVertexSrvDesc, GetCpuDescriptorHandle(VertexBuffersDescriptorStart + i));
-            device->CreateShaderResourceView(nullptr, &nullIndexSrvDesc, GetCpuDescriptorHandle(IndexBuffersDescriptorStart + i));
-            device->CreateShaderResourceView(nullptr, &nullTextureSrvDesc, GetCpuDescriptorHandle(TexturesDescriptorStart + i));
-        }
+            const RayTracingShaderBindingDesc& binding = Desc.Bindings[bindingIndex];
+            if (!IsDescriptorTableBinding(binding.Type))
+            {
+                continue;
+            }
 
-        device->CopyDescriptorsSimple(
-            1,
-            GetCpuDescriptorHandle(OutputDescriptorIndex),
-            OutputTexture->GetUnorderedAccessView(),
-            D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+            const uint32_t descriptorOffset = DescriptorTableOffsets[bindingIndex];
+            const BoundBinding& boundBinding = BoundBindings[bindingIndex];
 
-        for (uint32_t i = 0; i < meshCount; ++i)
-        {
-            const auto& mesh = meshes[i];
-            const VertexBuffer& vertexBuffer = mesh->GetVertexBuffer();
-            const IndexBuffer& indexBuffer = mesh->GetIndexBuffer();
+            if (binding.Type == RayTracingShaderBindingType::OutputTexture)
+            {
+                Assert(boundBinding.TextureResource != nullptr, "Ray tracing output texture is not bound.");
+                device->CopyDescriptorsSimple(
+                    1,
+                    DescriptorAllocation.GetDescriptorHandle(descriptorOffset),
+                    boundBinding.TextureResource->GetUnorderedAccessView(),
+                    D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+                continue;
+            }
 
-            const D3D12_SHADER_RESOURCE_VIEW_DESC vertexSrvDesc = CreateVertexBufferSrvDesc(vertexBuffer);
-            device->CreateShaderResourceView(
-                vertexBuffer.GetD3D12Resource().Get(),
-                &vertexSrvDesc,
-                GetCpuDescriptorHandle(VertexBuffersDescriptorStart + i));
+            if (binding.Type == RayTracingShaderBindingType::TextureArray)
+            {
+                Assert(boundBinding.TextureResources.size() <= binding.DescriptorCount, "Ray tracing texture array exceeds binding descriptor count.");
+                for (uint32_t i = 0; i < binding.DescriptorCount; ++i)
+                {
+                    if (i < boundBinding.TextureResources.size())
+                    {
+                        device->CopyDescriptorsSimple(
+                            1,
+                            DescriptorAllocation.GetDescriptorHandle(descriptorOffset + i),
+                            boundBinding.TextureResources[i]->GetShaderResourceView(),
+                            D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+                    }
+                    else
+                    {
+                        device->CreateShaderResourceView(nullptr, &nullTextureSrvDesc, DescriptorAllocation.GetDescriptorHandle(descriptorOffset + i));
+                    }
+                }
+                continue;
+            }
 
-            const D3D12_SHADER_RESOURCE_VIEW_DESC indexSrvDesc = CreateIndexBufferSrvDesc(indexBuffer);
-            device->CreateShaderResourceView(
-                indexBuffer.GetD3D12Resource().Get(),
-                &indexSrvDesc,
-                GetCpuDescriptorHandle(IndexBuffersDescriptorStart + i));
-        }
+            Assert(AccelerationStructure != nullptr, "Ray tracing acceleration structure is not bound.");
+            const std::vector<std::shared_ptr<Mesh>>& meshes = AccelerationStructure->GetMeshes();
+            Assert(meshes.size() <= binding.DescriptorCount, "Ray tracing mesh descriptor array exceeds binding descriptor count.");
 
-        for (uint32_t i = 0; i < textureCount; ++i)
-        {
-            device->CopyDescriptorsSimple(
-                1,
-                GetCpuDescriptorHandle(TexturesDescriptorStart + i),
-                Textures[i]->GetShaderResourceView(),
-                D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+            for (uint32_t i = 0; i < binding.DescriptorCount; ++i)
+            {
+                if (i >= meshes.size())
+                {
+                    const auto& nullDesc = binding.Type == RayTracingShaderBindingType::VertexBufferArray ?
+                        nullVertexSrvDesc :
+                        nullIndexSrvDesc;
+                    device->CreateShaderResourceView(nullptr, &nullDesc, DescriptorAllocation.GetDescriptorHandle(descriptorOffset + i));
+                    continue;
+                }
+
+                const auto& mesh = meshes[i];
+                if (binding.Type == RayTracingShaderBindingType::VertexBufferArray)
+                {
+                    const VertexBuffer& vertexBuffer = mesh->GetVertexBuffer();
+                    const D3D12_SHADER_RESOURCE_VIEW_DESC vertexSrvDesc = CreateVertexBufferSrvDesc(vertexBuffer);
+                    device->CreateShaderResourceView(
+                        vertexBuffer.GetD3D12Resource().Get(),
+                        &vertexSrvDesc,
+                        DescriptorAllocation.GetDescriptorHandle(descriptorOffset + i));
+                }
+                else
+                {
+                    const IndexBuffer& indexBuffer = mesh->GetIndexBuffer();
+                    const D3D12_SHADER_RESOURCE_VIEW_DESC indexSrvDesc = CreateIndexBufferSrvDesc(indexBuffer);
+                    device->CreateShaderResourceView(
+                        indexBuffer.GetD3D12Resource().Get(),
+                        &indexSrvDesc,
+                        DescriptorAllocation.GetDescriptorHandle(descriptorOffset + i));
+                }
+            }
         }
     }
 
-    D3D12_GPU_DESCRIPTOR_HANDLE GetGpuDescriptorHandle(const uint32_t descriptorIndex) const
+    struct BoundBinding
     {
-        auto handle = DescriptorHeap->GetGPUDescriptorHandleForHeapStart();
-        handle.ptr += static_cast<SIZE_T>(descriptorIndex) * DescriptorSize;
-        return handle;
-    }
+        std::shared_ptr<Texture> TextureResource;
+        std::vector<std::shared_ptr<Texture>> TextureResources;
+        const StructuredBuffer* Buffer = nullptr;
+        std::vector<uint8_t> ConstantBufferData;
+    };
 
-    D3D12_CPU_DESCRIPTOR_HANDLE GetCpuDescriptorHandle(const uint32_t descriptorIndex) const
-    {
-        auto handle = DescriptorHeap->GetCPUDescriptorHandleForHeapStart();
-        handle.ptr += static_cast<SIZE_T>(descriptorIndex) * DescriptorSize;
-        return handle;
-    }
-
-    RayTracingPipeline Pipeline;
+    RayTracingPipelineDesc Desc;
+    std::shared_ptr<RayTracingPipelineState> PipelineState;
     ShaderTable RayGenerationShaderTable;
     ShaderTable MissShaderTable;
     ShaderTable HitGroupShaderTable;
+    RayTracingShaderPassDesc DefaultPass;
+    std::string CurrentPassName;
 
-    std::shared_ptr<Texture> OutputTexture;
+    std::unordered_map<std::string, uint32_t> BindingIndicesByName;
+    std::map<uint32_t, BoundBinding> BoundBindings;
     const RayTracingAccelerationStructure* AccelerationStructure = nullptr;
-    const StructuredBuffer* MaterialBuffer = nullptr;
-    const StructuredBuffer* GeometryBuffer = nullptr;
-    std::vector<uint8_t> ConstantBufferData;
-    std::vector<std::shared_ptr<Texture>> Textures;
 
-    ComPtr<ID3D12DescriptorHeap> DescriptorHeap;
-    uint32_t DescriptorSize = 0;
-    uint32_t VertexBuffersDescriptorStart = 0;
-    uint32_t IndexBuffersDescriptorStart = 0;
-    uint32_t TexturesDescriptorStart = 0;
+    DescriptorAllocation DescriptorAllocation;
+    std::vector<uint32_t> DescriptorTableOffsets;
     bool DescriptorsDirty = true;
 };
 
+RayTracingPipelineDesc RayTracingShader::CreateDefaultPipelineDesc()
+{
+    RayTracingPipelineDesc desc;
+    desc.Exports = {
+        DefaultRayGenerationShaderName,
+        DefaultMissShaderName,
+        DefaultClosestHitShaderName
+    };
+    desc.HitGroups = {
+        {
+            DefaultHitGroupName,
+            DefaultClosestHitShaderName,
+            L"",
+            L"",
+            D3D12_HIT_GROUP_TYPE_TRIANGLES
+        }
+    };
+    desc.Bindings = {
+        { "Output", RayTracingShaderBindingType::OutputTexture, 0, 0, 1 },
+        { "Scene", RayTracingShaderBindingType::AccelerationStructure, 0, 0, 1 },
+        { "CameraConstants", RayTracingShaderBindingType::ConstantBuffer, 0, 0, 1 },
+        { "Materials", RayTracingShaderBindingType::StructuredBuffer, 1, 0, 1 },
+        { "Geometries", RayTracingShaderBindingType::StructuredBuffer, 2, 0, 1 },
+        { "VertexBuffers", RayTracingShaderBindingType::VertexBufferArray, 0, 1, desc.MaxDescriptorCount },
+        { "IndexBuffers", RayTracingShaderBindingType::IndexBufferArray, 0, 2, desc.MaxDescriptorCount },
+        { "Textures", RayTracingShaderBindingType::TextureArray, 0, 3, desc.MaxDescriptorCount }
+    };
+    desc.Passes = {
+        {
+            "RayGen",
+            DefaultRayGenerationShaderName,
+            { { DefaultMissShaderName, {} } },
+            { { DefaultHitGroupName, {} } }
+        }
+    };
+    return desc;
+}
+
 RayTracingShader::RayTracingShader(const ShaderBlob& shaderLibrary)
-    : m_Impl(std::make_unique<Impl>(shaderLibrary))
+    : RayTracingShader(shaderLibrary, CreateDefaultPipelineDesc())
+{}
+
+RayTracingShader::RayTracingShader(const ShaderBlob& shaderLibrary, RayTracingPipelineDesc desc)
+    : m_Impl(std::make_unique<Impl>(shaderLibrary, std::move(desc)))
 {}
 
 RayTracingShader::~RayTracingShader() = default;
@@ -431,104 +484,133 @@ bool RayTracingShader::IsSupported()
     return options5.RaytracingTier != D3D12_RAYTRACING_TIER_NOT_SUPPORTED;
 }
 
+const RayTracingPipelineDesc& RayTracingShader::GetDesc() const
+{
+    return m_Impl->Desc;
+}
+
 void RayTracingShader::SetOutputTexture(std::string_view name, const std::shared_ptr<Texture>& texture)
 {
-    Assert(name == "Output", "Unknown ray tracing output texture binding.");
+    const RayTracingShaderBindingDesc& binding = m_Impl->GetBinding(name, RayTracingShaderBindingType::OutputTexture);
     Assert(texture != nullptr, "Ray tracing output texture must not be null.");
-    m_Impl->OutputTexture = texture;
-    m_Impl->DescriptorsDirty = true;
+    m_Impl->BoundBindings[m_Impl->GetBindingIndex(binding)].TextureResource = texture;
+    m_Impl->MarkDescriptorsDirty(binding);
 }
 
 void RayTracingShader::SetAccelerationStructure(std::string_view name, const RayTracingAccelerationStructure& accelerationStructure)
 {
-    Assert(name == "Scene", "Unknown ray tracing acceleration structure binding.");
+    m_Impl->GetBinding(name, RayTracingShaderBindingType::AccelerationStructure);
     m_Impl->AccelerationStructure = &accelerationStructure;
     m_Impl->DescriptorsDirty = true;
 }
 
 void RayTracingShader::SetConstantBufferData(std::string_view name, const void* data, const size_t size)
 {
-    Assert(name == "CameraConstants", "Unknown ray tracing constant buffer binding.");
+    const RayTracingShaderBindingDesc& binding = m_Impl->GetBinding(name, RayTracingShaderBindingType::ConstantBuffer);
     Assert(data != nullptr && size > 0, "Ray tracing constant buffer data must not be empty.");
-    m_Impl->ConstantBufferData.resize(size);
-    std::memcpy(m_Impl->ConstantBufferData.data(), data, size);
+
+    auto& constantBufferData = m_Impl->BoundBindings[m_Impl->GetBindingIndex(binding)].ConstantBufferData;
+    constantBufferData.resize(size);
+    std::memcpy(constantBufferData.data(), data, size);
 }
 
 void RayTracingShader::SetStructuredBuffer(std::string_view name, const StructuredBuffer& buffer)
 {
-    if (name == "Materials")
-    {
-        m_Impl->MaterialBuffer = &buffer;
-        return;
-    }
-
-    if (name == "Geometries")
-    {
-        m_Impl->GeometryBuffer = &buffer;
-        return;
-    }
-
-    Assert(false, "Unknown ray tracing structured buffer binding.");
+    const RayTracingShaderBindingDesc& binding = m_Impl->GetBinding(name, RayTracingShaderBindingType::StructuredBuffer);
+    m_Impl->BoundBindings[m_Impl->GetBindingIndex(binding)].Buffer = &buffer;
 }
 
 void RayTracingShader::SetTextureArray(std::string_view name, const std::vector<std::shared_ptr<Texture>>& textures)
 {
-    Assert(name == "Textures", "Unknown ray tracing texture array binding.");
+    const RayTracingShaderBindingDesc& binding = m_Impl->GetBinding(name, RayTracingShaderBindingType::TextureArray);
     Assert(!textures.empty(), "Ray tracing texture array must not be empty.");
-    m_Impl->Textures = textures;
-    m_Impl->DescriptorsDirty = true;
+    Assert(textures.size() <= binding.DescriptorCount, "Ray tracing texture array exceeds binding descriptor count.");
+    m_Impl->BoundBindings[m_Impl->GetBindingIndex(binding)].TextureResources = textures;
+    m_Impl->MarkDescriptorsDirty(binding);
 }
 
 void RayTracingShader::Dispatch(
     CommandList& commandList,
-    std::string_view rayGenerationShaderName,
+    std::string_view passName,
     const uint32_t width,
     const uint32_t height,
     const uint32_t depth)
 {
-    Assert(rayGenerationShaderName == "RayGen", "This ray tracing shader wrapper currently supports the RayGen export.");
-    Assert(m_Impl->OutputTexture != nullptr, "Ray tracing output texture is not bound.");
+    const RayTracingShaderPassDesc& pass = m_Impl->ResolvePass(passName);
+    Assert(!pass.RayGenerationShader.empty(), "Ray tracing pass requires a ray generation shader.");
     Assert(m_Impl->AccelerationStructure != nullptr, "Ray tracing acceleration structure is not bound.");
-    Assert(m_Impl->MaterialBuffer != nullptr, "Ray tracing material buffer is not bound.");
-    Assert(m_Impl->GeometryBuffer != nullptr, "Ray tracing geometry buffer is not bound.");
-    Assert(!m_Impl->ConstantBufferData.empty(), "Ray tracing constant buffer is not bound.");
+
+    m_Impl->BuildShaderTables(pass);
 
     if (m_Impl->DescriptorsDirty)
     {
-        m_Impl->RebuildDescriptorHeap();
+        m_Impl->RebuildDescriptorAllocation();
         m_Impl->DescriptorsDirty = false;
     }
 
-    commandList.TransitionBarrier(*m_Impl->OutputTexture, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-    commandList.TransitionBarrier(*m_Impl->MaterialBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-    commandList.TransitionBarrier(*m_Impl->GeometryBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-
-    for (const auto& texture : m_Impl->Textures)
+    for (uint32_t bindingIndex = 0; bindingIndex < m_Impl->Desc.Bindings.size(); ++bindingIndex)
     {
-        commandList.TransitionBarrier(*texture, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        const RayTracingShaderBindingDesc& binding = m_Impl->Desc.Bindings[bindingIndex];
+        const auto boundBindingIt = m_Impl->BoundBindings.find(bindingIndex);
+        const Impl::BoundBinding* boundBinding = boundBindingIt != m_Impl->BoundBindings.end() ? &boundBindingIt->second : nullptr;
+
+        if (binding.Type == RayTracingShaderBindingType::OutputTexture)
+        {
+            Assert(boundBinding != nullptr && boundBinding->TextureResource != nullptr, "Ray tracing output texture is not bound.");
+            commandList.TransitionBarrier(*boundBinding->TextureResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        }
+        else if (binding.Type == RayTracingShaderBindingType::TextureArray)
+        {
+            Assert(boundBinding != nullptr, "Ray tracing texture array is not bound.");
+            for (const auto& texture : boundBinding->TextureResources)
+            {
+                commandList.TransitionBarrier(*texture, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            }
+        }
+        else if (binding.Type == RayTracingShaderBindingType::StructuredBuffer)
+        {
+            Assert(boundBinding != nullptr && boundBinding->Buffer != nullptr, "Ray tracing structured buffer is not bound.");
+            commandList.TransitionBarrier(*boundBinding->Buffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        }
     }
 
-    const auto constantBufferAllocation = commandList.AllocateInUploadBuffer(
-        m_Impl->ConstantBufferData.size(),
-        D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT);
-    std::memcpy(constantBufferAllocation.Cpu, m_Impl->ConstantBufferData.data(), m_Impl->ConstantBufferData.size());
+    commandList.SetRaytracingPipelineState(m_Impl->PipelineState->GetStateObject());
+    commandList.SetComputeRootSignature(m_Impl->PipelineState->GetGlobalRootSignature());
 
-    const auto d3d12CommandList = commandList.GetGraphicsCommandList();
+    for (uint32_t bindingIndex = 0; bindingIndex < m_Impl->Desc.Bindings.size(); ++bindingIndex)
+    {
+        const RayTracingShaderBindingDesc& binding = m_Impl->Desc.Bindings[bindingIndex];
+        const auto boundBindingIt = m_Impl->BoundBindings.find(bindingIndex);
+        const Impl::BoundBinding* boundBinding = boundBindingIt != m_Impl->BoundBindings.end() ? &boundBindingIt->second : nullptr;
 
-    commandList.SetRaytracingPipelineState(m_Impl->Pipeline.GetStateObject());
-    d3d12CommandList->SetComputeRootSignature(m_Impl->Pipeline.GetGlobalRootSignature().GetRootSignature().Get());
-
-    ID3D12DescriptorHeap* descriptorHeaps[] = { m_Impl->DescriptorHeap.Get() };
-    d3d12CommandList->SetDescriptorHeaps(1, descriptorHeaps);
-
-    d3d12CommandList->SetComputeRootDescriptorTable(Output, m_Impl->GetGpuDescriptorHandle(OutputDescriptorIndex));
-    d3d12CommandList->SetComputeRootShaderResourceView(AccelerationStructure, m_Impl->AccelerationStructure->GetGpuVirtualAddress());
-    d3d12CommandList->SetComputeRootConstantBufferView(Camera, constantBufferAllocation.Gpu);
-    d3d12CommandList->SetComputeRootShaderResourceView(Materials, m_Impl->MaterialBuffer->GetD3D12Resource()->GetGPUVirtualAddress());
-    d3d12CommandList->SetComputeRootShaderResourceView(Geometries, m_Impl->GeometryBuffer->GetD3D12Resource()->GetGPUVirtualAddress());
-    d3d12CommandList->SetComputeRootDescriptorTable(VertexBuffers, m_Impl->GetGpuDescriptorHandle(m_Impl->VertexBuffersDescriptorStart));
-    d3d12CommandList->SetComputeRootDescriptorTable(IndexBuffers, m_Impl->GetGpuDescriptorHandle(m_Impl->IndexBuffersDescriptorStart));
-    d3d12CommandList->SetComputeRootDescriptorTable(Textures, m_Impl->GetGpuDescriptorHandle(m_Impl->TexturesDescriptorStart));
+        if (IsDescriptorTableBinding(binding.Type))
+        {
+            commandList.StageDynamicDescriptors(
+                D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
+                bindingIndex,
+                0,
+                std::max(1u, binding.DescriptorCount),
+                m_Impl->DescriptorAllocation.GetDescriptorHandle(m_Impl->DescriptorTableOffsets[bindingIndex]));
+        }
+        else if (binding.Type == RayTracingShaderBindingType::AccelerationStructure)
+        {
+            commandList.SetComputeRootShaderResourceView(bindingIndex, m_Impl->AccelerationStructure->GetGpuVirtualAddress());
+        }
+        else if (binding.Type == RayTracingShaderBindingType::ConstantBuffer)
+        {
+            Assert(boundBinding != nullptr && !boundBinding->ConstantBufferData.empty(), "Ray tracing constant buffer is not bound.");
+            auto allocation = commandList.AllocateInUploadBuffer(
+                boundBinding->ConstantBufferData.size(),
+                D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT);
+            std::memcpy(allocation.Cpu, boundBinding->ConstantBufferData.data(), boundBinding->ConstantBufferData.size());
+            commandList.SetComputeRootConstantBufferView(bindingIndex, allocation.Gpu);
+        }
+        else if (binding.Type == RayTracingShaderBindingType::StructuredBuffer)
+        {
+            Assert(boundBinding != nullptr && boundBinding->Buffer != nullptr, "Ray tracing structured buffer is not bound.");
+            commandList.SetComputeRootShaderResourceView(bindingIndex, boundBinding->Buffer->GetD3D12Resource()->GetGPUVirtualAddress());
+        }
+    }
 
     D3D12_DISPATCH_RAYS_DESC dispatchDesc = {};
     dispatchDesc.RayGenerationShaderRecord.StartAddress = m_Impl->RayGenerationShaderTable.GetGpuVirtualAddress();
@@ -544,6 +626,18 @@ void RayTracingShader::Dispatch(
     dispatchDesc.Depth = depth;
 
     commandList.DispatchRays(dispatchDesc);
-    commandList.UavBarrier(*m_Impl->OutputTexture);
+
+    for (uint32_t bindingIndex = 0; bindingIndex < m_Impl->Desc.Bindings.size(); ++bindingIndex)
+    {
+        const RayTracingShaderBindingDesc& binding = m_Impl->Desc.Bindings[bindingIndex];
+        if (binding.Type != RayTracingShaderBindingType::OutputTexture)
+        {
+            continue;
+        }
+
+        const auto boundBindingIt = m_Impl->BoundBindings.find(bindingIndex);
+        Assert(boundBindingIt != m_Impl->BoundBindings.end() && boundBindingIt->second.TextureResource != nullptr, "Ray tracing output texture is not bound.");
+        commandList.UavBarrier(*boundBindingIt->second.TextureResource);
+    }
 }
 //Modify End

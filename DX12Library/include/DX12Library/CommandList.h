@@ -392,6 +392,42 @@ public:
         const D3D12_SHADER_RESOURCE_VIEW_DESC* srv = nullptr
     );
 
+//Modify Begin:2026-07-21 by BestHui
+    void SetGlobalTexture(
+        uint32_t rootParameterIndex,
+        uint32_t descriptorOffset,
+        const Resource& texture,
+        UINT firstSubresource = 0,
+        UINT numSubresources = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+        const D3D12_SHADER_RESOURCE_VIEW_DESC* srv = nullptr
+    );
+
+    void SetGlobalTexture(
+        uint32_t rootParameterIndex,
+        const Resource& texture,
+        UINT firstSubresource = 0,
+        UINT numSubresources = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+        const D3D12_SHADER_RESOURCE_VIEW_DESC* srv = nullptr
+    );
+
+    void SetTexture(
+        uint32_t rootParameterIndex,
+        uint32_t descriptorOffset,
+        const Resource& texture,
+        UINT firstSubresource = 0,
+        UINT numSubresources = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+        const D3D12_SHADER_RESOURCE_VIEW_DESC* srv = nullptr
+    );
+
+    void SetTexture(
+        uint32_t rootParameterIndex,
+        const Resource& texture,
+        UINT firstSubresource = 0,
+        UINT numSubresources = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+        const D3D12_SHADER_RESOURCE_VIEW_DESC* srv = nullptr
+    );
+//Modify End
+
     /**
      * Set the UAV on the graphics pipeline.
      */
@@ -441,6 +477,12 @@ public:
     void SetRaytracingPipelineState(const Microsoft::WRL::ComPtr<ID3D12StateObject>& stateObject);
     void DispatchRays(const D3D12_DISPATCH_RAYS_DESC& dispatchRaysDesc);
     void BuildRaytracingAccelerationStructure(const D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC& buildDesc);
+    void StageDynamicDescriptors(
+        D3D12_DESCRIPTOR_HEAP_TYPE heapType,
+        UINT rootParameterIndex,
+        UINT descriptorOffset,
+        UINT numDescriptors,
+        D3D12_CPU_DESCRIPTOR_HANDLE srcDescriptor);
 //Modify End
 
     /***************************************************************************

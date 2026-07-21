@@ -34,6 +34,7 @@ set(HEADER_FILES
         "include/Framework/ComputeShader.h"
 # Modify Begin:2026-07-21 by BestHui
         "include/Framework/RayTracingAccelerationStructure.h"
+        "include/Framework/RayTracingPipelineStateBuilder.h"
         "include/Framework/RayTracingShader.h"
 # Modify End
         "include/Framework/MSAADepthResolvePass.h"
@@ -71,6 +72,7 @@ set(SOURCE_FILES
         "src/ComputeShader.cpp"
 # Modify Begin:2026-07-21 by BestHui
         "src/RayTracingAccelerationStructure.cpp"
+        "src/RayTracingPipelineStateBuilder.cpp"
         "src/RayTracingShader.cpp"
 # Modify End
         "src/MSAADepthResolvePass.cpp"

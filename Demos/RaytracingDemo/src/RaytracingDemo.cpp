@@ -82,8 +82,11 @@ bool RaytracingDemo::LoadContent()
         D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET);
     m_TaaVelocityTexture = std::make_shared<Texture>(velocityDesc, nullptr, TextureUsageType::RenderTarget, L"Ray Tracing TAA Zero Velocity");
 
-    const std::vector<RayTracingMeshInstance> instances = CreateRaytracingInstances();
-    m_RayTracingAccelerationStructure.Build(*commandList, instances);
+    AddRaytracingInstances();
+
+    RayTracingAccelerationStructureBuildSettings accelerationStructureSettings{};
+    accelerationStructureSettings.AllowUpdate = true;
+    m_RayTracingAccelerationStructure.Build(*commandList, accelerationStructureSettings);
     commandList->CopyStructuredBuffer(m_MaterialBuffer, m_Materials);
     commandList->CopyStructuredBuffer(m_GeometryBuffer, m_RayTracingAccelerationStructure.GetGeometryData());
 
@@ -112,17 +115,27 @@ void RaytracingDemo::UnloadContent()
 
 void RaytracingDemo::ResizeRayTracingOutputTexture()
 {
-    const auto outputDesc = CD3DX12_RESOURCE_DESC::Tex2D(
-        DXGI_FORMAT_R8G8B8A8_UNORM,
-        static_cast<uint32_t>(std::max(1, m_Width)),
-        static_cast<uint32_t>(std::max(1, m_Height)),
-        1,
-        1,
-        1,
-        0,
-        D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+    const auto width = static_cast<uint32_t>(std::max(1, m_Width));
+    const auto height = static_cast<uint32_t>(std::max(1, m_Height));
 
-    m_RayTracingOutputTexture = std::make_shared<Texture>(outputDesc, nullptr, TextureUsageType::Other, L"Ray Tracing Output");
+    if (m_RayTracingOutputTexture == nullptr)
+    {
+        const auto outputDesc = CD3DX12_RESOURCE_DESC::Tex2D(
+            DXGI_FORMAT_R8G8B8A8_UNORM,
+            width,
+            height,
+            1,
+            1,
+            1,
+            0,
+            D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+
+        m_RayTracingOutputTexture = std::make_shared<Texture>(outputDesc, nullptr, TextureUsageType::Other, L"Ray Tracing Output");
+    }
+    else
+    {
+        m_RayTracingOutputTexture->Resize(width, height);
+    }
 
     if (m_RayTracingShader != nullptr)
     {
@@ -275,23 +288,21 @@ void RaytracingDemo::LoadDeferredLightingScene(CommandList& commandList)
 
 }
 
-std::vector<RayTracingMeshInstance> RaytracingDemo::CreateRaytracingInstances() const
+void RaytracingDemo::AddRaytracingInstances()
 {
-    std::vector<RayTracingMeshInstance> instances;
+    m_RayTracingAccelerationStructure.ClearInstances();
 
     for (const SceneObject& object : m_SceneObjects)
     {
         for (const auto& mesh : object.Model->GetMeshes())
         {
-            instances.push_back({
+            m_RayTracingAccelerationStructure.AddInstance({
                 mesh,
                 object.WorldMatrix,
                 object.MaterialIndex
             });
         }
     }
-
-    return instances;
 }
 
 void RaytracingDemo::OnUpdate(UpdateEventArgs& e)

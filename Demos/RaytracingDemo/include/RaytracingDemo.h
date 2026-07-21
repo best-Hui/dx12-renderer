@@ -85,7 +85,7 @@ private:
         const DirectX::XMFLOAT4& tilingOffset,
         uint32_t diffuseTextureIndex);
     void LoadDeferredLightingScene(CommandList& commandList);
-    std::vector<RayTracingMeshInstance> CreateRaytracingInstances() const;
+    void AddRaytracingInstances();
     void ResizeRayTracingOutputTexture();
 
     Camera m_Camera;
