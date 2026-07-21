@@ -1056,6 +1056,7 @@ void CommandList::Dispatch(const uint32_t numGroupsX, const uint32_t numGroupsY,
     m_D3d12CommandList->Dispatch(numGroupsX, numGroupsY, numGroupsZ);
 }
 
+//Modify Begin:2026-07-21 by BestHui
 void CommandList::SetRaytracingPipelineState(const ComPtr<ID3D12StateObject>& stateObject)
 {
     m_D3d12CommandList5->SetPipelineState1(stateObject.Get());
@@ -1073,6 +1074,7 @@ void CommandList::BuildRaytracingAccelerationStructure(const D3D12_BUILD_RAYTRAC
     FlushResourceBarriers();
     m_D3d12CommandList5->BuildRaytracingAccelerationStructure(&buildDesc, 0, nullptr);
 }
+//Modify End
 
 bool CommandList::Close(CommandList& pendingCommandList)
 {

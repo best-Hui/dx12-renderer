@@ -163,6 +163,9 @@ protected:
 
 	// Update the render target views for the swapchain back buffers.
 	void UpdateRenderTargetViews();
+//Modify Begin:2026-07-21 by BestHui
+	void UpdateFrameStatistics(double elapsedSeconds);
+//Modify End
 
 private:
 	// Windows should not be copied.
@@ -180,6 +183,10 @@ private:
 
 	HighResolutionClock UpdateClock;
 	HighResolutionClock RenderClock;
+//Modify Begin:2026-07-21 by BestHui
+	double FrameStatisticsElapsedSeconds = 0.0;
+	uint32_t FrameStatisticsCount = 0;
+//Modify End
 
 	UINT64 FenceValues[BUFFER_COUNT];
 	uint64_t FrameValues[BUFFER_COUNT];

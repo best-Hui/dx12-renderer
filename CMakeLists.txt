@@ -14,9 +14,11 @@ project(LearningDirectX12 LANGUAGES CXX)
 
 # Libraries
 add_subdirectory(DX12Library)
+# Modify Begin:2026-07-21 by BestHui
+# Ray tracing framework code is built through Framework instead of a standalone DXR target.
+# Modify End
 add_subdirectory(Framework)
 add_subdirectory(RenderGraph)
-add_subdirectory(DXR)
 
 # Demos
 add_subdirectory(Demos/AnimationsDemo)

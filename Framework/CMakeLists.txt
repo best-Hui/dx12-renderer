@@ -32,6 +32,10 @@ set(HEADER_FILES
         "include/Framework/SharedUploadBuffer.h"
         "include/Framework/UnorderedAccessView.h"
         "include/Framework/ComputeShader.h"
+# Modify Begin:2026-07-21 by BestHui
+        "include/Framework/RayTracingAccelerationStructure.h"
+        "include/Framework/RayTracingShader.h"
+# Modify End
         "include/Framework/MSAADepthResolvePass.h"
         "include/Framework/SSAOUtils.h"
         "include/Framework/TAA.h"
@@ -65,6 +69,10 @@ set(SOURCE_FILES
         "src/Material.cpp" 
         "src/ShaderBlob.cpp"
         "src/ComputeShader.cpp"
+# Modify Begin:2026-07-21 by BestHui
+        "src/RayTracingAccelerationStructure.cpp"
+        "src/RayTracingShader.cpp"
+# Modify End
         "src/MSAADepthResolvePass.cpp"
         "src/SSAOUtils.cpp"
         "src/TAA.cpp"

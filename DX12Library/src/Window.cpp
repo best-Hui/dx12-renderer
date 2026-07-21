@@ -11,6 +11,10 @@
 #include "Texture.h"
 #include "Helpers.h"
 
+//Modify Begin:2026-07-21 by BestHui
+#include <cwchar>
+//Modify End
+
 Window::Window(HWND hWnd, const std::wstring& windowName, int clientWidth, int clientHeight, bool vSync)
 	: HWnd(hWnd)
 	, WindowName(windowName)
@@ -201,8 +205,40 @@ void Window::OnRender(RenderEventArgs& e)
 		RenderEventArgs renderEventArgs(RenderClock.GetDeltaSeconds(), RenderClock.GetTotalSeconds(),
 			e.FrameNumber);
 		pGame->OnRender(renderEventArgs);
+//Modify Begin:2026-07-21 by BestHui
+		UpdateFrameStatistics(renderEventArgs.ElapsedTime);
+//Modify End
 	}
 }
+
+//Modify Begin:2026-07-21 by BestHui
+void Window::UpdateFrameStatistics(const double elapsedSeconds)
+{
+	FrameStatisticsElapsedSeconds += elapsedSeconds;
+	++FrameStatisticsCount;
+
+	if (FrameStatisticsElapsedSeconds < 0.5)
+	{
+		return;
+	}
+
+	const double fps = static_cast<double>(FrameStatisticsCount) / FrameStatisticsElapsedSeconds;
+	const double frameMilliseconds = fps > 0.0 ? 1000.0 / fps : 0.0;
+
+	wchar_t title[256] = {};
+	std::swprintf(
+		title,
+		sizeof(title) / sizeof(title[0]),
+		L"%ls - %.1f FPS (%.2f ms)",
+		WindowName.c_str(),
+		fps,
+		frameMilliseconds);
+	SetWindowTextW(HWnd, title);
+
+	FrameStatisticsElapsedSeconds = 0.0;
+	FrameStatisticsCount = 0;
+}
+//Modify End
 
 void Window::OnKeyPressed(KeyEventArgs& e)
 {

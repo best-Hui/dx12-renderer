@@ -437,9 +437,11 @@ public:
      */
     void Dispatch(uint32_t numGroupsX, uint32_t numGroupsY = 1, uint32_t numGroupsZ = 1);
 
+//Modify Begin:2026-07-21 by BestHui
     void SetRaytracingPipelineState(const Microsoft::WRL::ComPtr<ID3D12StateObject>& stateObject);
     void DispatchRays(const D3D12_DISPATCH_RAYS_DESC& dispatchRaysDesc);
     void BuildRaytracingAccelerationStructure(const D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC& buildDesc);
+//Modify End
 
     /***************************************************************************
      * Methods defined below are only intended to be used by internal classes. *

@@ -1,4 +1,5 @@
-#include <DXR/RaytracingScene.h>
+//Modify Begin:2026-07-21 by BestHui
+#include <Framework/RayTracingAccelerationStructure.h>
 
 #include <DX12Library/Application.h>
 #include <DX12Library/CommandList.h>
@@ -7,7 +8,6 @@
 
 #include <d3dx12.h>
 
-#include <algorithm>
 #include <cstring>
 
 using Microsoft::WRL::ComPtr;
@@ -22,115 +22,113 @@ namespace
     }
 }
 
-namespace Dxr
+void RayTracingAccelerationStructure::Build(CommandList& commandList, const std::vector<RayTracingMeshInstance>& instances)
 {
-    void RaytracingScene::Build(CommandList& commandList, const std::vector<MeshInstance>& instances)
+    m_BottomLevelAccelerationStructures.clear();
+    m_TopLevelAccelerationStructure.Reset();
+    m_InstanceDescUpload.Reset();
+    m_Meshes.clear();
+    m_GeometryData.clear();
+
+    std::map<const Mesh*, uint32_t> meshToBlasIndex;
+
+    for (const RayTracingMeshInstance& instance : instances)
     {
-        m_BottomLevelAccelerationStructures.clear();
-        m_TopLevelAccelerationStructure.Reset();
-        m_InstanceDescUpload.Reset();
-        m_Meshes.clear();
-        m_GeometryData.clear();
-
-        std::map<const Mesh*, uint32_t> meshToBlasIndex;
-
-        for (const MeshInstance& instance : instances)
+        if (meshToBlasIndex.contains(instance.Mesh.get()))
         {
-            if (meshToBlasIndex.contains(instance.Mesh.get()))
-            {
-                continue;
-            }
-
-            const uint32_t meshIndex = static_cast<uint32_t>(m_BottomLevelAccelerationStructures.size());
-            meshToBlasIndex.emplace(instance.Mesh.get(), meshIndex);
-            m_BottomLevelAccelerationStructures.push_back(BuildBottomLevelAccelerationStructure(commandList, instance.Mesh));
-            m_Meshes.push_back(instance.Mesh);
+            continue;
         }
 
-        BuildTopLevelAccelerationStructure(commandList, instances, meshToBlasIndex);
+        const uint32_t meshIndex = static_cast<uint32_t>(m_BottomLevelAccelerationStructures.size());
+        meshToBlasIndex.emplace(instance.Mesh.get(), meshIndex);
+        m_BottomLevelAccelerationStructures.push_back(BuildBottomLevelAccelerationStructure(commandList, instance.Mesh));
+        m_Meshes.push_back(instance.Mesh);
     }
 
-    D3D12_GPU_VIRTUAL_ADDRESS RaytracingScene::GetTopLevelAccelerationStructureGpuAddress() const
+    BuildTopLevelAccelerationStructure(commandList, instances, meshToBlasIndex);
+}
+
+D3D12_GPU_VIRTUAL_ADDRESS RayTracingAccelerationStructure::GetGpuVirtualAddress() const
+{
+    return m_TopLevelAccelerationStructure->GetGPUVirtualAddress();
+}
+
+const std::vector<std::shared_ptr<Mesh>>& RayTracingAccelerationStructure::GetMeshes() const
+{
+    return m_Meshes;
+}
+
+const std::vector<RayTracingGeometryData>& RayTracingAccelerationStructure::GetGeometryData() const
+{
+    return m_GeometryData;
+}
+
+uint32_t RayTracingAccelerationStructure::GetInstanceCount() const
+{
+    return static_cast<uint32_t>(m_GeometryData.size());
+}
+
+ComPtr<ID3D12Resource> RayTracingAccelerationStructure::CreateAccelerationStructureBuffer(
+    const uint64_t size,
+    const D3D12_RESOURCE_STATES initialState,
+    const wchar_t* name) const
+{
+    const auto device = Application::Get().GetDevice();
+    const auto heapProperties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+    const auto resourceDesc = CD3DX12_RESOURCE_DESC::Buffer(size, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+
+    ComPtr<ID3D12Resource> resource;
+    ThrowIfFailed(device->CreateCommittedResource(
+        &heapProperties,
+        D3D12_HEAP_FLAG_NONE,
+        &resourceDesc,
+        initialState,
+        nullptr,
+        IID_PPV_ARGS(&resource)));
+
+    if (name != nullptr)
     {
-        return m_TopLevelAccelerationStructure->GetGPUVirtualAddress();
+        resource->SetName(name);
     }
 
-    const std::vector<std::shared_ptr<Mesh>>& RaytracingScene::GetMeshes() const
+    return resource;
+}
+
+ComPtr<ID3D12Resource> RayTracingAccelerationStructure::CreateUploadBuffer(
+    const void* data,
+    const uint64_t size,
+    const wchar_t* name) const
+{
+    const auto device = Application::Get().GetDevice();
+    const auto heapProperties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+    const auto resourceDesc = CD3DX12_RESOURCE_DESC::Buffer(size);
+
+    ComPtr<ID3D12Resource> resource;
+    ThrowIfFailed(device->CreateCommittedResource(
+        &heapProperties,
+        D3D12_HEAP_FLAG_NONE,
+        &resourceDesc,
+        D3D12_RESOURCE_STATE_GENERIC_READ,
+        nullptr,
+        IID_PPV_ARGS(&resource)));
+
+    if (name != nullptr)
     {
-        return m_Meshes;
+        resource->SetName(name);
     }
 
-    const std::vector<GeometryData>& RaytracingScene::GetGeometryData() const
-    {
-        return m_GeometryData;
-    }
+    void* mappedData = nullptr;
+    ThrowIfFailed(resource->Map(0, nullptr, &mappedData));
+    std::memcpy(mappedData, data, size);
+    resource->Unmap(0, nullptr);
 
-    uint32_t RaytracingScene::GetInstanceCount() const
-    {
-        return static_cast<uint32_t>(m_GeometryData.size());
-    }
+    return resource;
+}
 
-    ComPtr<ID3D12Resource> RaytracingScene::CreateAccelerationStructureBuffer(
-        const uint64_t size,
-        const D3D12_RESOURCE_STATES initialState,
-        const wchar_t* name) const
-    {
-        const auto device = Application::Get().GetDevice();
-        const auto heapProperties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-        const auto resourceDesc = CD3DX12_RESOURCE_DESC::Buffer(size, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
-
-        ComPtr<ID3D12Resource> resource;
-        ThrowIfFailed(device->CreateCommittedResource(
-            &heapProperties,
-            D3D12_HEAP_FLAG_NONE,
-            &resourceDesc,
-            initialState,
-            nullptr,
-            IID_PPV_ARGS(&resource)));
-
-        if (name != nullptr)
-        {
-            resource->SetName(name);
-        }
-
-        return resource;
-    }
-
-    ComPtr<ID3D12Resource> RaytracingScene::CreateUploadBuffer(
-        const void* data,
-        const uint64_t size,
-        const wchar_t* name) const
-    {
-        const auto device = Application::Get().GetDevice();
-        const auto heapProperties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
-        const auto resourceDesc = CD3DX12_RESOURCE_DESC::Buffer(size);
-
-        ComPtr<ID3D12Resource> resource;
-        ThrowIfFailed(device->CreateCommittedResource(
-            &heapProperties,
-            D3D12_HEAP_FLAG_NONE,
-            &resourceDesc,
-            D3D12_RESOURCE_STATE_GENERIC_READ,
-            nullptr,
-            IID_PPV_ARGS(&resource)));
-
-        if (name != nullptr)
-        {
-            resource->SetName(name);
-        }
-
-        void* mappedData = nullptr;
-        ThrowIfFailed(resource->Map(0, nullptr, &mappedData));
-        std::memcpy(mappedData, data, size);
-        resource->Unmap(0, nullptr);
-
-        return resource;
-    }
-
-    RaytracingScene::BottomLevelAccelerationStructure RaytracingScene::BuildBottomLevelAccelerationStructure(
-        CommandList& commandList,
-        const std::shared_ptr<Mesh>& mesh) const
-    {
+RayTracingAccelerationStructure::BottomLevelAccelerationStructure RayTracingAccelerationStructure::BuildBottomLevelAccelerationStructure(
+    CommandList& commandList,
+    const std::shared_ptr<Mesh>& mesh) const
+{
         const auto device = GetDxrDevice();
         const VertexBuffer& vertexBuffer = mesh->GetVertexBuffer();
         const IndexBuffer& indexBuffer = mesh->GetIndexBuffer();
@@ -163,11 +161,15 @@ namespace Dxr
         auto result = CreateAccelerationStructureBuffer(
             prebuildInfo.ResultDataMaxSizeInBytes,
             D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE,
-            L"DXR Bottom Level Acceleration Structure");
+            L"Ray Tracing Bottom Level Acceleration Structure");
         auto scratch = CreateAccelerationStructureBuffer(
             prebuildInfo.ScratchDataSizeInBytes,
-            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-            L"DXR BLAS Scratch");
+            D3D12_RESOURCE_STATE_COMMON,
+            L"Ray Tracing BLAS Scratch");
+
+        const D3D12_RESOURCE_BARRIER scratchBarrier =
+            CD3DX12_RESOURCE_BARRIER::Transition(scratch.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        commandList.GetGraphicsCommandList()->ResourceBarrier(1, &scratchBarrier);
 
         D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC buildDesc = {};
         buildDesc.Inputs = inputs;
@@ -182,9 +184,9 @@ namespace Dxr
         return { mesh, result };
     }
 
-    void RaytracingScene::BuildTopLevelAccelerationStructure(
+    void RayTracingAccelerationStructure::BuildTopLevelAccelerationStructure(
         CommandList& commandList,
-        const std::vector<MeshInstance>& instances,
+        const std::vector<RayTracingMeshInstance>& instances,
         const std::map<const Mesh*, uint32_t>& meshToBlasIndex)
     {
         const auto device = GetDxrDevice();
@@ -193,7 +195,7 @@ namespace Dxr
         instanceDescs.reserve(instances.size());
         m_GeometryData.reserve(instances.size());
 
-        for (const MeshInstance& instance : instances)
+        for (const RayTracingMeshInstance& instance : instances)
         {
             const uint32_t blasIndex = meshToBlasIndex.at(instance.Mesh.get());
 
@@ -217,7 +219,7 @@ namespace Dxr
         m_InstanceDescUpload = CreateUploadBuffer(
             instanceDescs.data(),
             sizeof(D3D12_RAYTRACING_INSTANCE_DESC) * instanceDescs.size(),
-            L"DXR Instance Descriptions");
+            L"Ray Tracing Instance Descriptions");
 
         D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS inputs = {};
         inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL;
@@ -233,11 +235,15 @@ namespace Dxr
         m_TopLevelAccelerationStructure = CreateAccelerationStructureBuffer(
             prebuildInfo.ResultDataMaxSizeInBytes,
             D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE,
-            L"DXR Top Level Acceleration Structure");
+            L"Ray Tracing Top Level Acceleration Structure");
         auto scratch = CreateAccelerationStructureBuffer(
             prebuildInfo.ScratchDataSizeInBytes,
-            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-            L"DXR TLAS Scratch");
+            D3D12_RESOURCE_STATE_COMMON,
+            L"Ray Tracing TLAS Scratch");
+
+        const D3D12_RESOURCE_BARRIER scratchBarrier =
+            CD3DX12_RESOURCE_BARRIER::Transition(scratch.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        commandList.GetGraphicsCommandList()->ResourceBarrier(1, &scratchBarrier);
 
         D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC buildDesc = {};
         buildDesc.Inputs = inputs;
@@ -249,5 +255,5 @@ namespace Dxr
         commandList.GetGraphicsCommandList()->ResourceBarrier(1, &uavBarrier);
         commandList.TrackObject(scratch);
         commandList.TrackObject(m_InstanceDescUpload);
-    }
 }
+//Modify End
