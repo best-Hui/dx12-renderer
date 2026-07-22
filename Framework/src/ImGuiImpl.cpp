@@ -110,6 +110,19 @@ ImGuiImpl::ImGuiImpl(CommandList& commandList, const Window& window, const std::
     //io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
 
     ImGui::StyleColorsDark();
+    //Modify Begin:2026-07-21 by BestHui
+    ImGuiStyle& style = ImGui::GetStyle();
+    io.FontGlobalScale = 1.25f;
+    style.ScaleAllSizes(1.12f);
+    style.Colors[ImGuiCol_WindowBg].w = 0.38f;
+    style.Colors[ImGuiCol_ChildBg].w = 0.24f;
+    style.Colors[ImGuiCol_PopupBg].w = 0.82f;
+    style.Colors[ImGuiCol_TitleBg].w = 0.62f;
+    style.Colors[ImGuiCol_TitleBgActive].w = 0.72f;
+    style.Colors[ImGuiCol_FrameBg].w = 0.48f;
+    style.Colors[ImGuiCol_FrameBgHovered].w = 0.62f;
+    style.Colors[ImGuiCol_FrameBgActive].w = 0.70f;
+    //Modify End
 
     ImGui_ImplWin32_Init(window.GetWindowHandle());
     //Modify Begin:2026-07-21 by BestHui

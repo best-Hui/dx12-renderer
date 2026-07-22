@@ -1,0 +1,91 @@
+#include <ShaderLibrary/Common/RootSignature.hlsli>
+#include "SvgfCommon.hlsli"
+
+cbuffer SvgfAtrousConstants : register(b0)
+{
+    uint Width;
+    uint Height;
+    uint StepSize;
+    uint Padding0;
+    float PhiColor;
+    float PhiNormal;
+    float PhiDepth;
+    float Padding1;
+};
+
+Texture2D<float4> InputColor : register(t0);
+Texture2D<float> Variance : register(t1);
+Texture2D<float4> GBufferNormal : register(t2);
+Texture2D<float4> GBufferPosition : register(t3);
+Texture2D<float> DepthTexture : register(t4);
+
+RWTexture2D<float4> OutputColor : register(u0);
+
+static const float Kernel[5] = {
+    1.0f / 16.0f,
+    1.0f / 4.0f,
+    3.0f / 8.0f,
+    1.0f / 4.0f,
+    1.0f / 16.0f
+};
+
+[numthreads(8, 8, 1)]
+void main(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    const uint2 pixel = dispatchThreadId.xy;
+    if (pixel.x >= Width || pixel.y >= Height)
+    {
+        return;
+    }
+
+    const float centerDepth = DepthTexture.Load(int3(pixel, 0));
+    const float4 centerColor = InputColor.Load(int3(pixel, 0));
+    if (!SvgfIsValidDepth(centerDepth))
+    {
+        OutputColor[pixel] = centerColor;
+        return;
+    }
+
+    const float3 centerNormal = DecodeSvgfNormal(GBufferNormal.Load(int3(pixel, 0)).xyz);
+    const float3 centerPosition = GBufferPosition.Load(int3(pixel, 0)).xyz;
+    const float centerVariance = Variance.Load(int3(pixel, 0));
+
+    float3 colorSum = 0.0f;
+    float weightSum = 0.0f;
+
+    [unroll]
+    for (int y = -2; y <= 2; ++y)
+    {
+        [unroll]
+        for (int x = -2; x <= 2; ++x)
+        {
+            const int2 samplePixel = int2(pixel) + int2(x, y) * int(StepSize);
+            if (samplePixel.x < 0 || samplePixel.y < 0 || samplePixel.x >= int(Width) || samplePixel.y >= int(Height))
+            {
+                continue;
+            }
+
+            const float sampleDepth = DepthTexture.Load(int3(samplePixel, 0));
+            if (!SvgfIsValidDepth(sampleDepth))
+            {
+                continue;
+            }
+
+            const float4 sampleColor = InputColor.Load(int3(samplePixel, 0));
+            const float3 sampleNormal = DecodeSvgfNormal(GBufferNormal.Load(int3(samplePixel, 0)).xyz);
+            const float3 samplePosition = GBufferPosition.Load(int3(samplePixel, 0)).xyz;
+
+            const float kernelWeight = Kernel[x + 2] * Kernel[y + 2];
+            const float normalWeight = SvgfNormalWeight(centerNormal, sampleNormal, PhiNormal);
+            const float depthWeight = SvgfDepthWeight(centerDepth, sampleDepth, centerPosition, samplePosition, PhiDepth);
+            const float colorWeight = SvgfColorWeight(centerColor.rgb, sampleColor.rgb, centerVariance, PhiColor);
+            const float weight = kernelWeight * normalWeight * depthWeight * colorWeight;
+
+            colorSum += sampleColor.rgb * weight;
+            weightSum += weight;
+        }
+    }
+
+    const float3 filteredColor = weightSum > 0.0f ? colorSum / weightSum : centerColor.rgb;
+    OutputColor[pixel] = float4(filteredColor, centerColor.a);
+}

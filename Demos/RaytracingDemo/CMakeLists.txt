@@ -5,37 +5,72 @@ project("RaytracingDemo")
 set(HEADER_FILES
         include/RaytracingDemo.h
         include/RenderGraph.User.h
+        include/Passes/RaytracingDemoPassResources.h
+        include/Passes/RaytracingDemoPasses.h
+        include/Passes/NrdPass.h
+        include/Passes/SvgfPass.h
+        include/Scene/SceneLighting.h
         )
 
 set(SOURCE_FILES
         src/main.cpp
         src/RaytracingDemo.cpp
         src/RenderGraph.User.cpp
+        src/Passes/GBufferPass.cpp
+        src/Passes/ImGuiPass.cpp
+        src/Passes/NrdPass.cpp
+        src/Passes/NrdRenderPass.cpp
+        src/Passes/PathTracingPass.cpp
+        src/Passes/RaytracingDemoPassResources.cpp
+        src/Passes/SetupPass.cpp
+        src/Passes/SkyboxPass.cpp
+        src/Passes/SvgfPass.cpp
+        src/Passes/SvgfRenderPass.cpp
         )
 
 set(SHADER_FILES_RAYTRACING
-        shaders/RaytracingDemo_RT.hlsl
+        shaders/PathTracing/PathTracing.rt.hlsl
         )
 
 set(SHADERS_HEADER_FILES
-        shaders/RaytracingDemo_RT_Types.hlsli
-        shaders/RaytracingDemo_RT_Random.hlsli
-        shaders/RaytracingDemo_RT_GBuffer.hlsli
-        shaders/RaytracingDemo_RT_Lighting.hlsli
+        shaders/Common/PathTracingConstants.hlsli
+        shaders/Common/RayOffset.hlsli
+        shaders/GBuffer/GBufferLayout.hlsli
+        shaders/GBuffer/GBufferSampling.hlsli
+        shaders/PathTracing/PathTracingTypes.hlsli
+        shaders/PathTracing/PathTracingGeometry.hlsli
+        shaders/PathTracing/PathTracingPayload.hlsli
+        shaders/PathTracing/PathTracingRandom.hlsli
+        shaders/PathTracing/PathTracing.rt.hlsli
+        shaders/PathTracing/PathTracing.rayquery.hlsli
+        shaders/PathTracing/PathTracingShared.hlsli
+        shaders/PathTracing/PathTracingSurface.hlsli
+        shaders/Scene/SceneCamera.hlsli
+        shaders/Scene/SceneGeometry.hlsli
+        shaders/Scene/SceneResources.hlsli
+        shaders/Scene/SceneLighting.hlsli
+        shaders/SVGF/SvgfCommon.hlsli
+        ${CMAKE_SOURCE_DIR}/External/NRD/Shaders/NRD.hlsli
+        ${CMAKE_SOURCE_DIR}/External/NRD/Shaders/NRDConfig.hlsli
         )
 
 set(SHADER_FILES_VERTEX
-        shaders/RaytracingDemo_GBuffer_VS.hlsl
-        shaders/RaytracingDemo_Skybox_VS.hlsl
+        shaders/GBuffer/GBuffer.vs.hlsl
+        shaders/Skybox/Skybox.vs.hlsl
         )
 
 set(SHADER_FILES_PIXEL
-        shaders/RaytracingDemo_GBuffer_PS.hlsl
-        shaders/RaytracingDemo_Skybox_PS.hlsl
+        shaders/GBuffer/GBuffer.ps.hlsl
+        shaders/Skybox/Skybox.ps.hlsl
         )
 
 set(SHADER_FILES_COMPUTE
-        shaders/RaytracingDemo_InlineRT_CS.hlsl
+        shaders/NRD/NrdComposite.cs.hlsl
+        shaders/NRD/NrdPrepare.cs.hlsl
+        shaders/PathTracing/InlinePathTracing.cs.hlsl
+        shaders/SVGF/SvgfAtrous.cs.hlsl
+        shaders/SVGF/SvgfComposite.cs.hlsl
+        shaders/SVGF/SvgfTemporal.cs.hlsl
         )
 
 set(TARGET_NAME RaytracingDemo)
@@ -51,6 +86,28 @@ target_link_libraries(${TARGET_NAME}
         PUBLIC RenderGraph
         )
 
+set(NRD_ROOT "${CMAKE_SOURCE_DIR}/External/NRD")
+set(NRI_ROOT "${CMAKE_SOURCE_DIR}/External/NRI")
+set(NRD_BIN_DIR "${NRD_ROOT}/_Bin")
+set(NRI_BIN_DIR "${NRD_ROOT}/_Bin")
+
+target_include_directories(${TARGET_NAME} PRIVATE
+        "${NRD_ROOT}/Include"
+        "${NRD_ROOT}/Integration"
+        "${NRI_ROOT}/Include"
+        )
+
+target_link_libraries(${TARGET_NAME}
+        PRIVATE "${NRD_BIN_DIR}/NRD.lib"
+        PRIVATE "${NRI_BIN_DIR}/NRI.lib"
+        )
+
+add_custom_command(TARGET ${TARGET_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${NRD_BIN_DIR}/NRD.dll" "$<TARGET_FILE_DIR:${TARGET_NAME}>/NRD.dll"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${NRI_BIN_DIR}/NRI.dll" "$<TARGET_FILE_DIR:${TARGET_NAME}>/NRI.dll"
+        VERBATIM
+)
+
 # Modify Begin:2026-07-21 by BestHui
 set(PROJECT_DXC_EXECUTABLE "${CMAKE_SOURCE_DIR}/DXC/dxc.exe")
 if (EXISTS "${PROJECT_DXC_EXECUTABLE}")
@@ -63,7 +120,7 @@ endif()
 # Modify End
 
 set(RAYTRACING_SHADER_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/${SHADER_FILES_RAYTRACING}")
-set(RAYTRACING_SHADER_OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/Shaders/RaytracingDemo_RT.cso")
+set(RAYTRACING_SHADER_OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/Shaders/PathTracing.rt.cso")
 
 # Modify Begin:2026-07-21 by BestHui
 set(RAYTRACING_SHADER_MODEL lib_6_6)
@@ -76,13 +133,13 @@ endif()
 add_custom_command(TARGET ${TARGET_NAME} PRE_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/Shaders"
 # Modify Begin:2026-07-21 by BestHui
-        COMMAND "${DXC_EXECUTABLE}" -T ${RAYTRACING_SHADER_MODEL} -HV 2021 -Fo "${RAYTRACING_SHADER_OUTPUT}" "${RAYTRACING_SHADER_SOURCE}" -I "${CMAKE_SOURCE_DIR}/DXC/include" -I "${CMAKE_SOURCE_DIR}/Shaders" -I "${CMAKE_CURRENT_SOURCE_DIR}/shaders" -WX
+        COMMAND "${DXC_EXECUTABLE}" -T ${RAYTRACING_SHADER_MODEL} -HV 2021 -Fo "${RAYTRACING_SHADER_OUTPUT}" "${RAYTRACING_SHADER_SOURCE}" -I "${CMAKE_SOURCE_DIR}/DXC/include" -I "${CMAKE_SOURCE_DIR}/Shaders" -I "${CMAKE_SOURCE_DIR}/External/NRD/Shaders" -I "${CMAKE_CURRENT_SOURCE_DIR}/shaders" -WX
 # Modify End
         VERBATIM
 )
 
 add_custom_command(TARGET ${TARGET_NAME} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${TARGET_NAME}>/Shaders"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${RAYTRACING_SHADER_OUTPUT}" "$<TARGET_FILE_DIR:${TARGET_NAME}>/Shaders/RaytracingDemo_RT.cso"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${RAYTRACING_SHADER_OUTPUT}" "$<TARGET_FILE_DIR:${TARGET_NAME}>/Shaders/PathTracing.rt.cso"
         VERBATIM
 )

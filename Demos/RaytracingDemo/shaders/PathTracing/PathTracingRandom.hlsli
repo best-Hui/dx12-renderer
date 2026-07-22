@@ -1,7 +1,7 @@
-#ifndef RAYTRACING_DEMO_RT_RANDOM_HLSLI
-#define RAYTRACING_DEMO_RT_RANDOM_HLSLI
+#ifndef RAYTRACING_DEMO_PATH_TRACING_RANDOM_HLSLI
+#define RAYTRACING_DEMO_PATH_TRACING_RANDOM_HLSLI
 
-#include "RaytracingDemo_RT_Types.hlsli"
+#include "../Common/PathTracingConstants.hlsli"
 
 uint Hash(uint value)
 {

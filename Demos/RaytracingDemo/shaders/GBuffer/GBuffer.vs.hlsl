@@ -33,6 +33,8 @@ struct VertexShaderOutput
 {
     float3 PositionWs : POSITION_WS;
     float3 NormalWs : NORMAL;
+    float3 TangentWs : TANGENT;
+    float3 BitangentWs : BINORMAL;
     float2 Uv : TEXCOORD0;
     float4 PositionCs : SV_POSITION;
 };
@@ -43,6 +45,8 @@ VertexShaderOutput main(VertexAttributes IN)
     const float4 positionWs = mul(g_Model_Model, float4(IN.PositionOs, 1.0f));
     OUT.PositionWs = positionWs.xyz;
     OUT.NormalWs = normalize(mul((float3x3)g_Model_InverseTransposeModel, IN.NormalOs));
+    OUT.TangentWs = normalize(mul((float3x3)g_Model_Model, IN.TangentOs));
+    OUT.BitangentWs = normalize(mul((float3x3)g_Model_Model, IN.BitangentOs));
     OUT.Uv = IN.Uv;
     OUT.PositionCs = mul(g_Model_ModelViewProjection, float4(IN.PositionOs, 1.0f));
     return OUT;

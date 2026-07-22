@@ -1,0 +1,29 @@
+#ifndef RAYTRACING_DEMO_PATH_TRACING_DXR_HLSLI
+#define RAYTRACING_DEMO_PATH_TRACING_DXR_HLSLI
+
+#include "PathTracingGeometry.hlsli"
+
+RayPayload TraceScene(float3 origin, float3 direction, float tMax, uint flags)
+{
+    RayDesc ray;
+    ray.Origin = origin;
+    ray.Direction = direction;
+    ray.TMin = 0.0f;
+    ray.TMax = tMax;
+
+    RayPayload payload;
+    payload.BaseColor = 0.0f;
+    payload.HitT = 0.0f;
+    payload.Normal = 0.0f;
+    payload.Hit = 0u;
+    payload.PositionError = 0.0f;
+    payload.Metallic = 0.0f;
+    payload.Roughness = 1.0f;
+    payload.AmbientOcclusion = 1.0f;
+    payload.Padding0 = 0u;
+
+    TraceRay(RAYTRACING_DEMO_SCENE, flags, 0xFF, 0, 1, 0, ray, payload);
+    return payload;
+}
+
+#endif

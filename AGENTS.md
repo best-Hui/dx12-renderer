@@ -21,3 +21,10 @@
 ```
 
 - Use the current calendar date for `YYYY-MM-DD`.
+
+## Existing API First
+
+- Before implementing renderer features, first search the existing project APIs under `Framework`, `DX12Library`, `RenderGraph`, and nearby demos.
+- Prefer existing wrappers and data structures over creating duplicate demo-local abstractions.
+- This is especially important for lights, materials, command list helpers, upload buffers, shader/resource binding, render passes, and RenderGraph resources.
+- Demo code may define GPU packing structures when shader layout requires it, but scene-level concepts should reuse Framework-level types where available.

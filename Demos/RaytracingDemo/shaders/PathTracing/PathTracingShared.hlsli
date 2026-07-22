@@ -1,0 +1,297 @@
+#ifndef RAYTRACING_DEMO_PATH_TRACING_SHARED_HLSLI
+#define RAYTRACING_DEMO_PATH_TRACING_SHARED_HLSLI
+
+#include "../GBuffer/GBufferSampling.hlsli"
+#include "../Common/RayOffset.hlsli"
+#include "PathTracingRandom.hlsli"
+
+float3 SampleSkybox(float3 direction)
+{
+    return Skybox.SampleLevel(LinearWrapSampler, direction, 0.0f).rgb * Camera_SkyLight.ColorAndIntensity.rgb * Camera_SkyLight.ColorAndIntensity.w;
+}
+
+float3 ToneMap(float3 color)
+{
+    color = color / (color + 1.0f);
+    return pow(saturate(color), 1.0f / 2.2f);
+}
+
+float3 SanitizeNrdRadiance(float3 color)
+{
+    if (!all(isfinite(color)))
+    {
+        return 0.0f;
+    }
+
+    return min(max(color, 0.0f), 10000.0f);
+}
+
+bool IsVisibleAlongRay(float3 origin, float3 direction, float tMax)
+{
+    RayPayload shadowPayload = TraceScene(
+        origin,
+        direction,
+        tMax,
+        RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH);
+    return shadowPayload.Hit == 0u;
+}
+
+float FresnelPow5(float value)
+{
+    const float value2 = value * value;
+    return value2 * value2 * value;
+}
+
+float3 FresnelSchlick(float cosTheta, float3 f0)
+{
+    return f0 + (1.0f - f0) * FresnelPow5(saturate(1.0f - cosTheta));
+}
+
+float DistributionGGX(float3 normalWs, float3 halfVectorWs, float roughness)
+{
+    const float a = max(0.001f, roughness * roughness);
+    const float a2 = a * a;
+    const float nDotH = saturate(dot(normalWs, halfVectorWs));
+    const float nDotH2 = nDotH * nDotH;
+    const float denom = nDotH2 * (a2 - 1.0f) + 1.0f;
+    return a2 / max(0.0001f, PI * denom * denom);
+}
+
+float GeometrySchlickGGX(float nDotV, float roughness)
+{
+    const float r = roughness + 1.0f;
+    const float k = (r * r) * 0.125f;
+    return nDotV / max(0.0001f, nDotV * (1.0f - k) + k);
+}
+
+float GeometrySmith(float3 normalWs, float3 viewDirectionWs, float3 lightDirectionWs, float roughness)
+{
+    return GeometrySchlickGGX(saturate(dot(normalWs, viewDirectionWs)), roughness) *
+        GeometrySchlickGGX(saturate(dot(normalWs, lightDirectionWs)), roughness);
+}
+
+float3 EvaluatePbrLighting(SurfaceData surface, float3 lightDirectionWs, float3 radiance)
+{
+    const float3 normalWs = normalize(surface.NormalWs);
+    const float3 viewDirectionWs = normalize(Camera_Position.xyz - surface.PositionWs);
+    const float3 halfVectorWs = normalize(viewDirectionWs + lightDirectionWs);
+    const float roughness = max(0.04f, surface.Roughness);
+    const float metallic = saturate(surface.Metallic);
+    const float nDotL = saturate(dot(normalWs, lightDirectionWs));
+    const float nDotV = saturate(dot(normalWs, viewDirectionWs));
+    if (nDotL <= 0.0f || nDotV <= 0.0f)
+    {
+        return 0.0f;
+    }
+
+    const float3 f0 = lerp(surface.Specular, surface.Diffuse, metallic);
+    const float3 f = FresnelSchlick(saturate(dot(halfVectorWs, viewDirectionWs)), f0);
+    const float d = DistributionGGX(normalWs, halfVectorWs, roughness);
+    const float g = GeometrySmith(normalWs, viewDirectionWs, lightDirectionWs, roughness);
+    const float3 specular = (d * g * f) / max(0.0001f, 4.0f * nDotV * nDotL);
+    const float3 kd = (1.0f - f) * (1.0f - metallic);
+    return (kd * surface.Diffuse * INV_PI + specular) * radiance * nDotL * surface.AmbientOcclusion;
+}
+
+float3 EvaluateDirectionalLight(DirectionalLightData light, SurfaceData surface)
+{
+    float3 lightDirection = normalize(light.DirectionAndAngularRadius.xyz);
+    float nDotL = saturate(dot(surface.NormalWs, lightDirection));
+    if (nDotL <= 0.0f)
+    {
+        return 0.0f;
+    }
+
+    const float3 rayOrigin = OffsetRayOrigin(surface.PositionWs, surface.PositionError, surface.NormalWs, lightDirection);
+    if (!IsVisibleAlongRay(rayOrigin, lightDirection, 10000.0f))
+    {
+        return 0.0f;
+    }
+
+    float3 radiance = light.ColorAndIntensity.rgb * light.ColorAndIntensity.w;
+    return EvaluatePbrLighting(surface, lightDirection, radiance);
+}
+
+float3 EvaluatePointLight(PointLightData light, SurfaceData surface)
+{
+    float3 toLight = light.PositionAndRange.xyz - surface.PositionWs;
+    float distanceToLight = length(toLight);
+    if (distanceToLight <= 0.001f || distanceToLight > light.PositionAndRange.w)
+    {
+        return 0.0f;
+    }
+
+    float3 lightDirection = toLight / distanceToLight;
+    float nDotL = saturate(dot(surface.NormalWs, lightDirection));
+    if (nDotL <= 0.0f)
+    {
+        return 0.0f;
+    }
+
+    const float3 rayOrigin = OffsetRayOrigin(surface.PositionWs, surface.PositionError, surface.NormalWs, lightDirection);
+    if (!IsVisibleAlongRay(rayOrigin, lightDirection, distanceToLight))
+    {
+        return 0.0f;
+    }
+
+    float3 attenuationTerms = light.Attenuation.xyz;
+    float attenuation = rcp(max(
+        0.001f,
+        attenuationTerms.x + attenuationTerms.y * distanceToLight + attenuationTerms.z * distanceToLight * distanceToLight));
+    float3 radiance = light.ColorAndIntensity.rgb * light.ColorAndIntensity.w * attenuation;
+    return EvaluatePbrLighting(surface, lightDirection, radiance);
+}
+
+float3 EvaluateAreaLight(AreaLightData light, SurfaceData surface, inout uint rngState)
+{
+    float2 sampleUv = float2(Random01(rngState), Random01(rngState)) * 2.0f - 1.0f;
+    float3 samplePosition =
+        light.PositionAndRange.xyz +
+        light.AxisUAndExtent.xyz * light.AxisUAndExtent.w * sampleUv.x +
+        light.AxisVAndExtent.xyz * light.AxisVAndExtent.w * sampleUv.y;
+
+    float3 toLight = samplePosition - surface.PositionWs;
+    float distanceToLight = length(toLight);
+    if (distanceToLight <= 0.001f || distanceToLight > light.PositionAndRange.w)
+    {
+        return 0.0f;
+    }
+
+    float3 lightDirection = toLight / distanceToLight;
+    float nDotL = saturate(dot(surface.NormalWs, lightDirection));
+    float lightFacing = saturate(dot(normalize(light.NormalAndType.xyz), -lightDirection));
+    if (nDotL <= 0.0f || lightFacing <= 0.0f)
+    {
+        return 0.0f;
+    }
+
+    const float3 rayOrigin = OffsetRayOrigin(surface.PositionWs, surface.PositionError, surface.NormalWs, lightDirection);
+    if (!IsVisibleAlongRay(rayOrigin, lightDirection, distanceToLight))
+    {
+        return 0.0f;
+    }
+
+    float area = max(0.0001f, 4.0f * light.AxisUAndExtent.w * light.AxisVAndExtent.w);
+    float3 radiance = light.ColorAndIntensity.rgb * light.ColorAndIntensity.w * area * lightFacing / max(0.001f, distanceToLight * distanceToLight);
+    return EvaluatePbrLighting(surface, lightDirection, radiance);
+}
+
+float3 EvaluateDirectLighting(SurfaceData surface, inout uint rngState)
+{
+    uint directionalLightCount = min(Camera_DirectionalLightCount, MaxDirectionalLights);
+    uint pointLightCount = min(Camera_PointLightCount, MaxPointLights);
+    uint areaLightCount = min(Camera_AreaLightCount, MaxAreaLights);
+    uint totalLightCount = directionalLightCount + pointLightCount + areaLightCount;
+    if (totalLightCount == 0u)
+    {
+        return 0.0f;
+    }
+
+    uint lightIndex = min(uint(Random01(rngState) * float(totalLightCount)), totalLightCount - 1u);
+    if (lightIndex < directionalLightCount)
+    {
+        return EvaluateDirectionalLight(DirectionalLights[lightIndex], surface) * float(totalLightCount);
+    }
+
+    lightIndex -= directionalLightCount;
+    if (lightIndex < pointLightCount)
+    {
+        return EvaluatePointLight(PointLights[lightIndex], surface) * float(totalLightCount);
+    }
+
+    lightIndex -= pointLightCount;
+    return EvaluateAreaLight(AreaLights[lightIndex], surface, rngState) * float(totalLightCount);
+}
+
+float3 TraceGBufferPath(SurfaceData surface, inout uint rngState)
+{
+    float3 diffuseColor = surface.Diffuse * (1.0f - surface.Metallic);
+    float3 radiance = EvaluateDirectLighting(surface, rngState);
+    float3 throughput = max(diffuseColor, surface.Specular);
+    float3 direction = SampleCosineHemisphere(surface.NormalWs, rngState);
+    float3 origin = OffsetRayOrigin(surface.PositionWs, surface.PositionError, surface.NormalWs, direction);
+    uint bounceCount = min(Camera_MaxBounces, 5u);
+
+    [loop]
+    for (uint bounce = 0u; bounce < bounceCount; ++bounce)
+    {
+        RayPayload payload = TraceScene(origin, direction, 10000.0f, RAY_FLAG_NONE);
+        if (payload.Hit == 0u)
+        {
+            radiance += throughput * payload.BaseColor;
+            break;
+        }
+
+        float3 positionWs = origin + direction * payload.HitT;
+        SurfaceData hitSurface;
+        hitSurface.Diffuse = saturate(payload.BaseColor);
+        hitSurface.Specular = 0.04f;
+        hitSurface.PositionWs = positionWs;
+        hitSurface.NormalWs = payload.Normal;
+        hitSurface.PositionError = payload.PositionError;
+        hitSurface.Metallic = payload.Metallic;
+        hitSurface.Roughness = payload.Roughness;
+        hitSurface.AmbientOcclusion = payload.AmbientOcclusion;
+        hitSurface.Valid = true;
+
+        float3 normalWs = hitSurface.NormalWs;
+        float3 diffuseColor = hitSurface.Diffuse * (1.0f - hitSurface.Metallic);
+        radiance += throughput * EvaluateDirectLighting(hitSurface, rngState);
+
+        throughput *= diffuseColor;
+        if (max(throughput.r, max(throughput.g, throughput.b)) < 0.005f)
+        {
+            break;
+        }
+
+        direction = SampleCosineHemisphere(normalWs, rngState);
+        origin = OffsetRayOrigin(positionWs, payload.PositionError, normalWs, direction);
+    }
+
+    return radiance;
+}
+
+void WritePathTracingOutput(uint2 pixel, uint width, uint frameIndex)
+{
+    SurfaceData surface = LoadGBufferSurface(pixel);
+    if (!surface.Valid)
+    {
+        float2 uv = (float2(pixel) + 0.5f) / float2(Camera_Width, Camera_Height);
+        float4 clip = float4(uv * 2.0f - 1.0f, 1.0f, 1.0f);
+        clip.y = -clip.y;
+        float4 view = mul(clip, Camera_InverseProjection);
+        view.xyz /= max(view.w, 0.0001f);
+        float3 skyDirection = normalize(mul(float4(normalize(view.xyz), 0.0f), Camera_InverseView).xyz);
+        NrdNoisyRadiance[pixel] = float4(SanitizeNrdRadiance(SampleSkybox(skyDirection)), 0.0f);
+        return;
+    }
+
+    uint rngState = Hash(pixel.x + pixel.y * width + frameIndex * 9781u);
+    float3 sampleColor = TraceGBufferPath(surface, rngState);
+    float primaryHitDistance = length(surface.PositionWs - Camera_Position.xyz);
+    float nrdHitDistance = primaryHitDistance;
+    if (Camera_NrdDenoiserMode == 1u)
+    {
+        nrdHitDistance = saturate(primaryHitDistance / max(Camera_NrdReblurHitDistanceScale, 0.001f));
+    }
+    NrdNoisyRadiance[pixel] = float4(SanitizeNrdRadiance(sampleColor), nrdHitDistance);
+
+    if (Camera_AccumulationEnabled == 0u)
+    {
+        Output[pixel] = float4(ToneMap(sampleColor), 1.0f);
+        return;
+    }
+
+    uint previousSampleCount = Camera_AccumulationFrameIndex;
+    float3 accumulatedColor = sampleColor;
+    if (previousSampleCount > 0u)
+    {
+        float3 history = Accumulation[pixel].rgb;
+        accumulatedColor = (history * float(previousSampleCount) + sampleColor) / float(previousSampleCount + 1u);
+    }
+
+    Accumulation[pixel] = float4(accumulatedColor, float(previousSampleCount + 1u));
+    Output[pixel] = float4(ToneMap(accumulatedColor), 1.0f);
+}
+
+#endif

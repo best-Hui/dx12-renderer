@@ -1,0 +1,47 @@
+#include <Passes/RaytracingDemoPasses.h>
+
+#include <Passes/RaytracingDemoPassResources.h>
+#include <RaytracingDemo.h>
+
+#include <Framework/Mesh.h>
+#include <Framework/ShaderResourceView.h>
+#include <RenderGraph/RenderPass.h>
+
+using namespace DirectX;
+
+std::unique_ptr<RenderGraph::RenderPass> RaytracingDemoPasses::Builder::CreateSkyboxPass(RaytracingDemo& demo)
+{
+    using namespace RenderGraph;
+    using DemoResourceIds = RaytracingDemoRenderGraph::ResourceIds;
+
+    return RenderPass::Create(
+        L"Skybox",
+        {
+            { DemoResourceIds::GBufferFinishedToken, InputType::Token },
+        },
+        {
+            { RenderGraph::ResourceIds::GRAPH_OUTPUT, OutputType::RenderTarget },
+            { DemoResourceIds::DepthBuffer, OutputType::DepthRead },
+            { DemoResourceIds::SkyboxFinishedToken, OutputType::Token },
+        },
+        [&demo](const RenderContext&, CommandList& cmd)
+        {
+            demo.m_RootSignature->Bind(cmd);
+            demo.m_RootSignature->SetPipelineConstantBuffer(cmd, demo.BuildPipelineConstants());
+
+            const XMMATRIX viewProjection = demo.m_Camera.GetViewMatrix() * demo.m_Camera.GetProjectionMatrix();
+            const XMMATRIX modelMatrix = XMMatrixScaling(2.0f, 2.0f, 2.0f) * XMMatrixTranslationFromVector(demo.m_Camera.GetTranslation());
+            RaytracingDemo::ModelConstants modelConstants{};
+            modelConstants.Model = modelMatrix;
+            modelConstants.ModelViewProjection = modelMatrix * viewProjection;
+            modelConstants.InverseTransposeModel = XMMatrixTranspose(XMMatrixInverse(nullptr, modelMatrix));
+            demo.m_RootSignature->SetModelConstantBuffer(cmd, modelConstants);
+
+            const auto skyboxSrv = ShaderResourceView(demo.m_SkyboxTexture, RaytracingDemoRenderGraph::CreateSkyboxSrvDesc(*demo.m_SkyboxTexture));
+            demo.m_RootSignature->SetMaterialShaderResourceView(cmd, 0, skyboxSrv);
+
+            demo.m_SkyboxShader->Bind(cmd);
+            demo.m_SkyboxMesh->Draw(cmd);
+            demo.m_SkyboxShader->Unbind(cmd);
+        });
+}

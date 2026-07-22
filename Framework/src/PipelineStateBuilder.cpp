@@ -102,8 +102,10 @@ PipelineStateBuilder& PipelineStateBuilder::WithAlphaBlend()
     rtBlendDesc.BlendOp = D3D12_BLEND_OP_ADD;
     rtBlendDesc.BlendOpAlpha = D3D12_BLEND_OP_ADD;
     rtBlendDesc.SrcBlend = D3D12_BLEND_SRC_ALPHA;
-    rtBlendDesc.SrcBlendAlpha = D3D12_BLEND_SRC_ALPHA;
     rtBlendDesc.DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
+    //Modify Begin:2026-07-21 by BestHui
+    rtBlendDesc.SrcBlendAlpha = D3D12_BLEND_ONE;
+    //Modify End
     rtBlendDesc.DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA;
     return WithBlend(blendDesc);
 }

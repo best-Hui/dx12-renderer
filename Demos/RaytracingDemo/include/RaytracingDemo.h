@@ -11,8 +11,12 @@
 #include <Framework/RayTracingAccelerationStructure.h>
 #include <Framework/RayTracingShader.h>
 #include <Framework/Shader.h>
+#include <Framework/SharedUploadBuffer.h>
 
+#include <Passes/NrdPass.h>
+#include <Passes/SvgfPass.h>
 #include <RenderGraph/RenderGraphRoot.h>
+#include <Scene/SceneLighting.h>
 
 #include <memory>
 #include <string>
@@ -20,10 +24,14 @@
 
 struct GraphicsSettings;
 class CommandList;
-
 namespace RenderGraph
 {
     class User;
+}
+
+namespace RaytracingDemoPasses
+{
+    class Builder;
 }
 
 class RaytracingDemo final : public Game
@@ -33,8 +41,10 @@ public:
 
     RaytracingDemo(const std::wstring& name, int width, int height, GraphicsSettings graphicsSettings);
 
-    static constexpr uint32_t MaxPathTracingLights = 8;
-    static constexpr uint32_t MaxInlineRayTracingTextures = 8;
+    static constexpr uint32_t MaxDirectionalLights = 8;
+    static constexpr uint32_t MaxPointLights = 256;
+    static constexpr uint32_t MaxAreaLights = 64;
+    static constexpr uint32_t MaxInlineRayTracingTextures = 32;
     static constexpr uint32_t MaxInlineRayTracingGeometryBuffers = 256;
 
     bool LoadContent() override;
@@ -56,16 +66,19 @@ private:
         DirectX::XMFLOAT4 Specular = { 0.04f, 0.04f, 0.04f, 1.0f };
         DirectX::XMFLOAT4 TilingOffset = { 1.0f, 1.0f, 0.0f, 0.0f };
         uint32_t DiffuseTextureIndex = 0;
+        uint32_t NormalTextureIndex = 0;
+        uint32_t MetallicTextureIndex = 0;
+        uint32_t RoughnessTextureIndex = 0;
+        uint32_t AmbientOcclusionTextureIndex = 0;
+        uint32_t HasDiffuseMap = 0;
+        uint32_t HasNormalMap = 0;
+        uint32_t HasMetallicMap = 0;
+        uint32_t HasRoughnessMap = 0;
+        uint32_t HasAmbientOcclusionMap = 0;
         float Metallic = 0.0f;
         float Roughness = 0.5f;
         uint32_t Padding0 = 0;
-    };
-
-    struct PathTracingLightData
-    {
-        DirectX::XMFLOAT4 PositionAndRange = { 0.0f, 0.0f, 0.0f, 0.0f };
-        DirectX::XMFLOAT4 ColorAndIntensity = { 0.0f, 0.0f, 0.0f, 1.0f };
-        DirectX::XMFLOAT4 Attenuation = { 1.0f, 0.0f, 0.0f, 0.0f };
+        uint32_t Padding1 = 0;
     };
 
     struct CameraConstants
@@ -77,11 +90,17 @@ private:
         uint32_t Height = 1;
         uint32_t MaxBounces = 5;
         uint32_t SamplesPerPixel = 1;
-        uint32_t LightCount = 0;
+        uint32_t DirectionalLightCount = 0;
+        uint32_t PointLightCount = 0;
+        uint32_t AreaLightCount = 0;
         uint32_t FrameIndex = 0;
         uint32_t AccumulationFrameIndex = 0;
-        uint32_t Padding = 0;
-        PathTracingLightData Lights[MaxPathTracingLights] = {};
+        uint32_t AccumulationEnabled = 1;
+        uint32_t NrdDenoiserMode = 0;
+        float NrdReblurHitDistanceScale = 100.0f;
+        uint32_t Padding0 = 0;
+        uint32_t Padding1 = 0;
+        SkyLightData SkyLight = {};
     };
 
     struct PipelineConstants
@@ -111,7 +130,14 @@ private:
         DirectX::XMFLOAT4 TilingOffset = { 1.0f, 1.0f, 0.0f, 0.0f };
         float Metallic = 0.0f;
         float Roughness = 0.5f;
-        DirectX::XMFLOAT2 Padding = { 0.0f, 0.0f };
+        uint32_t HasDiffuseMap = 0;
+        uint32_t HasNormalMap = 0;
+        uint32_t HasMetallicMap = 0;
+        uint32_t HasRoughnessMap = 0;
+        uint32_t HasAmbientOcclusionMap = 0;
+        uint32_t Padding0 = 0;
+        uint32_t Padding1 = 0;
+        uint32_t Padding2 = 0;
     };
 
     struct SceneObject
@@ -121,14 +147,36 @@ private:
         uint32_t MaterialIndex = 0;
     };
 
-    enum class RayTracingExecutionMode
+    enum class PathTracingBackend
     {
-        StandardDxr = 0,
-        InlineRayTracing = 1,
+        InlineRayQuery = 0,
+        ShaderTableDxr = 1,
+    };
+
+    enum class DenoiserAlgorithm
+    {
+        Off = 0,
+        Nrd = 1,
+        Svgf = 2,
     };
 
     uint32_t AddTexture(CommandList& commandList, const std::wstring& path, TextureUsageType usage = TextureUsageType::Albedo);
     uint32_t AddMaterial(const MaterialData& material);
+    uint32_t AddPbrMaterial(
+        const DirectX::XMFLOAT4& diffuse,
+        const DirectX::XMFLOAT4& tilingOffset,
+        uint32_t diffuseTextureIndex,
+        uint32_t normalTextureIndex,
+        uint32_t metallicTextureIndex,
+        uint32_t roughnessTextureIndex,
+        uint32_t ambientOcclusionTextureIndex,
+        float metallic = 0.0f,
+        float roughness = 0.5f,
+        bool hasDiffuseMap = true,
+        bool hasNormalMap = false,
+        bool hasMetallicMap = false,
+        bool hasRoughnessMap = false,
+        bool hasAmbientOcclusionMap = false);
     uint32_t AddDiffuseMaterial(
         const DirectX::XMFLOAT4& diffuse,
         const DirectX::XMFLOAT4& tilingOffset,
@@ -136,21 +184,43 @@ private:
         float metallic = 0.0f,
         float roughness = 0.5f);
     void LoadDeferredLightingScene(CommandList& commandList);
+    void CreateDemoLights();
+    void UpdateDynamicLights(float timeSeconds);
+    void InitializeSceneLightBuffers(CommandList& commandList);
+    void BuildSceneLightGpuData();
+    void UpdatePointLightGpuData(size_t lightIndex);
+    void MarkDirectionalLightsDirty();
+    void MarkPointLightsDirty(size_t beginIndex, size_t endIndex);
+    void MarkAreaLightsDirty();
+    void UploadSceneLightBuffers(CommandList& commandList);
     void AddRaytracingInstances();
     void BindRayTracingShaderResources();
     CameraConstants BuildCameraConstants() const;
     PipelineConstants BuildPipelineConstants() const;
     void ResetAccumulation();
+    bool IsDenoiserEnabled() const { return m_DenoiserAlgorithm != DenoiserAlgorithm::Off; }
+    bool IsNrdDenoiserEnabled() const { return m_DenoiserAlgorithm == DenoiserAlgorithm::Nrd; }
+    bool IsSvgfDenoiserEnabled() const { return m_DenoiserAlgorithm == DenoiserAlgorithm::Svgf; }
+    void ApplyDenoiserSelection();
     void OnImGui();
 
     Camera m_Camera;
     friend class RenderGraph::User;
+    friend class RaytracingDemoPasses::Builder;
+    friend class NrdPass;
+    friend class SvgfPass;
     std::unique_ptr<RenderGraph::RenderGraphRoot> m_RenderGraph;
     std::unique_ptr<RayTracingShader> m_RayTracingShader;
-    std::unique_ptr<ComputeShader> m_InlineRayTracingShader;
+    std::unique_ptr<ComputeShader> m_InlinePathTracingShader;
+    std::unique_ptr<NrdPass> m_NrdPass;
+    std::unique_ptr<SvgfPass> m_SvgfPass;
     RayTracingAccelerationStructure m_RayTracingAccelerationStructure;
     StructuredBuffer m_MaterialBuffer;
     StructuredBuffer m_GeometryBuffer;
+    StructuredBuffer m_DirectionalLightBuffer;
+    StructuredBuffer m_PointLightBuffer;
+    StructuredBuffer m_AreaLightBuffer;
+    std::unique_ptr<SharedUploadBuffer> m_LightUploadBuffer;
     std::shared_ptr<CommonRootSignature> m_RootSignature;
     std::unique_ptr<ImGuiImpl> m_ImGui;
     std::shared_ptr<Mesh> m_SkyboxMesh;
@@ -162,18 +232,35 @@ private:
     std::vector<MaterialData> m_Materials;
     std::vector<std::shared_ptr<Texture>> m_Textures;
 
+    SkyLightData m_SkyLight;
+    std::vector<DirectionalLight> m_DirectionalLights;
     std::vector<PointLight> m_PointLights;
+    std::vector<AreaLightData> m_AreaLights;
+    std::vector<DirectionalLightData> m_DirectionalLightGpuData;
+    std::vector<PointLightData> m_PointLightGpuData;
+    std::vector<AreaLightData> m_AreaLightGpuData;
+    std::vector<float> m_PointLightBaseY;
+    std::vector<float> m_PointLightPhase;
+    std::vector<float> m_PointLightOrbitRadius;
+    std::vector<float> m_PointLightOrbitSpeed;
+    bool m_DirectionalLightsDirty = false;
+    bool m_AreaLightsDirty = false;
+    size_t m_PointLightDirtyBegin = 0;
+    size_t m_PointLightDirtyEnd = 0;
 
     float m_DeltaTime = 0.0f;
     uint32_t m_FrameIndex = 0;
     uint32_t m_AccumulationFrameIndex = 0;
-    int m_MaxBounces = 5;
+    int m_MaxBounces = 1;
+    bool m_AccumulationEnabled = true;
+    DenoiserAlgorithm m_DenoiserAlgorithm = DenoiserAlgorithm::Off;
+    bool m_AnimatePointLights = true;
     float m_CameraFov = 45.0f;
     float m_MouseRotateSpeed = 0.1f;
     float m_MousePanSpeed = 0.04f;
     float m_MouseDollySpeed = 0.04f;
     float m_MouseWheelDollySpeed = 0.5f;
-    RayTracingExecutionMode m_RayTracingExecutionMode = RayTracingExecutionMode::StandardDxr;
+    PathTracingBackend m_PathTracingBackend = PathTracingBackend::InlineRayQuery;
     int m_Width = 1;
     int m_Height = 1;
 

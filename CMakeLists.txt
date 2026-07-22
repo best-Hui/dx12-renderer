@@ -14,7 +14,7 @@ project(LearningDirectX12 LANGUAGES CXX)
 
 # Modify Begin:2026-07-21 by BestHui
 set(DX12_RENDERER_ENABLE_SM610_LINALG OFF)
-set(DX12_RENDERER_RAYTRACING_SHADER "${CMAKE_SOURCE_DIR}/Demos/RaytracingDemo/shaders/RaytracingDemo_RT.hlsl")
+set(DX12_RENDERER_RAYTRACING_SHADER "${CMAKE_SOURCE_DIR}/Demos/RaytracingDemo/shaders/PathTracing/PathTracing.rt.hlsl")
 if (EXISTS "${DX12_RENDERER_RAYTRACING_SHADER}")
         file(STRINGS "${DX12_RENDERER_RAYTRACING_SHADER}" DX12_RENDERER_LINALG_DEFINE_LINE
                 REGEX "^[ \t]*#[ \t]*define[ \t]+RAYTRACING_DEMO_ENABLE_LINALG[ \t]+[01]"
