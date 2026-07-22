@@ -13,7 +13,17 @@ cmake_policy(SET CMP0079 NEW)
 project(LearningDirectX12 LANGUAGES CXX)
 
 # Modify Begin:2026-07-21 by BestHui
-option(DX12_RENDERER_ENABLE_SM610_LINALG "Build RaytracingDemo CHS with the SM6.10 LinAlg preview path." ON)
+set(DX12_RENDERER_ENABLE_SM610_LINALG OFF)
+set(DX12_RENDERER_RAYTRACING_SHADER "${CMAKE_SOURCE_DIR}/Demos/RaytracingDemo/shaders/RaytracingDemo_RT.hlsl")
+if (EXISTS "${DX12_RENDERER_RAYTRACING_SHADER}")
+        file(STRINGS "${DX12_RENDERER_RAYTRACING_SHADER}" DX12_RENDERER_LINALG_DEFINE_LINE
+                REGEX "^[ \t]*#[ \t]*define[ \t]+RAYTRACING_DEMO_ENABLE_LINALG[ \t]+[01]"
+                LIMIT_COUNT 1)
+        if (DX12_RENDERER_LINALG_DEFINE_LINE MATCHES "^[ \t]*#[ \t]*define[ \t]+RAYTRACING_DEMO_ENABLE_LINALG[ \t]+1")
+                set(DX12_RENDERER_ENABLE_SM610_LINALG ON)
+        endif()
+endif()
+message(STATUS "RaytracingDemo SM6.10 LinAlg path: ${DX12_RENDERER_ENABLE_SM610_LINALG}")
 # Modify End
 
 # Libraries
