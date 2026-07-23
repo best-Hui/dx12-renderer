@@ -93,7 +93,7 @@ Ssao::Ssao(const std::shared_ptr<CommonRootSignature>& rootSignature, CommandLis
 
     {
         auto shader = std::make_shared<Shader>(rootSignature, blitShaderBlob, ShaderBlob(L"SSAO_Blur_PS.cso"),
-            [](PipelineStateBuilder& builder)
+            [](RasterPipelineStateBuilder& builder)
             {
                 CD3DX12_BLEND_DESC blendDesc{};
                 auto& rtBlendDesc = blendDesc.RenderTarget[0];

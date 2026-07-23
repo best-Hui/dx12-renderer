@@ -10,7 +10,7 @@ Reflections::Reflections(const std::shared_ptr<CommonRootSignature>& rootSignatu
 	auto shader = std::make_shared<Shader>(rootSignature,
 		ShaderBlob(ShaderBytecode_Blit_VS, sizeof ShaderBytecode_Blit_VS),
 		ShaderBlob(L"DeferredLightingDemo_LightBuffer_Reflections_PS.cso"),
-		[](PipelineStateBuilder& builder)
+		[](RasterPipelineStateBuilder& builder)
 		{
 			builder
 				.WithAdditiveBlend()

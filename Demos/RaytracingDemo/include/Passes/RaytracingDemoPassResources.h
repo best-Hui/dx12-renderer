@@ -23,21 +23,6 @@ namespace RaytracingDemoRenderGraph
     constexpr DXGI_FORMAT DEPTH_FORMAT = DXGI_FORMAT_D32_FLOAT;
     constexpr DXGI_FORMAT OUTPUT_FORMAT = DXGI_FORMAT_R8G8B8A8_UNORM;
 
-    constexpr uint32_t INLINE_SRV_GBUFFER_ALBEDO_OCCLUSION = 0;
-    constexpr uint32_t INLINE_SRV_GBUFFER_SPECULAR_SMOOTHNESS = 1;
-    constexpr uint32_t INLINE_SRV_GBUFFER_NORMAL = 2;
-    constexpr uint32_t INLINE_SRV_GBUFFER_EMISSION_METALLIC = 3;
-    constexpr uint32_t INLINE_SRV_GBUFFER_POSITION = 4;
-    constexpr uint32_t INLINE_SRV_DEPTH = 5;
-    constexpr uint32_t INLINE_SRV_SKYBOX = 6;
-    constexpr uint32_t INLINE_SRV_MATERIALS = 7;
-    constexpr uint32_t INLINE_SRV_GEOMETRIES = 8;
-    constexpr uint32_t INLINE_SRV_DIRECTIONAL_LIGHTS = 9;
-    constexpr uint32_t INLINE_SRV_POINT_LIGHTS = 10;
-    constexpr uint32_t INLINE_SRV_AREA_LIGHTS = 11;
-    constexpr uint32_t INLINE_SRV_TEXTURES_BEGIN = 16;
-    constexpr uint32_t INLINE_SRV_VERTEX_BUFFERS_BEGIN = 48;
-
     class ResourceIds
     {
     public:
@@ -61,9 +46,6 @@ namespace RaytracingDemoRenderGraph
         static inline const RenderGraph::ResourceId NrdFinishedToken = RenderGraph::ResourceIds::GetResourceId(L"RaytracingDemo.NrdFinished");
         static inline const RenderGraph::ResourceId DenoiseFinishedToken = RenderGraph::ResourceIds::GetResourceId(L"RaytracingDemo.DenoiseFinished");
     };
-
-    D3D12_SHADER_RESOURCE_VIEW_DESC CreateSkyboxSrvDesc(const Texture& skybox);
-    D3D12_SHADER_RESOURCE_VIEW_DESC CreateDepthSrvDesc();
 
     std::vector<RenderGraph::TextureDescription> CreateTextureDescriptions();
     std::vector<RenderGraph::BufferDescription> CreateBufferDescriptions();

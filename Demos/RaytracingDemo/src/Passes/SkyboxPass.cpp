@@ -37,7 +37,7 @@ std::unique_ptr<RenderGraph::RenderPass> RaytracingDemoPasses::Builder::CreateSk
             modelConstants.InverseTransposeModel = XMMatrixTranspose(XMMatrixInverse(nullptr, modelMatrix));
             demo.m_RootSignature->SetModelConstantBuffer(cmd, modelConstants);
 
-            const auto skyboxSrv = ShaderResourceView(demo.m_SkyboxTexture, RaytracingDemoRenderGraph::CreateSkyboxSrvDesc(*demo.m_SkyboxTexture));
+            const auto skyboxSrv = ShaderResourceView::TextureCube(demo.m_SkyboxTexture);
             demo.m_RootSignature->SetMaterialShaderResourceView(cmd, 0, skyboxSrv);
 
             demo.m_SkyboxShader->Bind(cmd);

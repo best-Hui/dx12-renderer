@@ -2,31 +2,6 @@
 
 namespace RaytracingDemoRenderGraph
 {
-    D3D12_SHADER_RESOURCE_VIEW_DESC CreateSkyboxSrvDesc(const Texture& skybox)
-    {
-        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-        srvDesc.Format = skybox.GetD3D12ResourceDesc().Format;
-        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
-        srvDesc.TextureCube.MipLevels = 1;
-        srvDesc.TextureCube.MostDetailedMip = 0;
-        srvDesc.TextureCube.ResourceMinLODClamp = 0.0f;
-        return srvDesc;
-    }
-
-    D3D12_SHADER_RESOURCE_VIEW_DESC CreateDepthSrvDesc()
-    {
-        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-        srvDesc.Format = DXGI_FORMAT_R32_FLOAT;
-        srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-        srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-        srvDesc.Texture2D.MipLevels = 1;
-        srvDesc.Texture2D.MostDetailedMip = 0;
-        srvDesc.Texture2D.PlaneSlice = 0;
-        srvDesc.Texture2D.ResourceMinLODClamp = 0.0f;
-        return srvDesc;
-    }
-
     std::vector<RenderGraph::TextureDescription> CreateTextureDescriptions()
     {
         const RenderGraph::RenderMetadataExpression<uint32_t> renderWidthExpression = [](const RenderGraph::RenderMetadata& metadata) { return metadata.m_ScreenWidth; };

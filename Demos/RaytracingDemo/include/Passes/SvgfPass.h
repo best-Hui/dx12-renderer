@@ -77,7 +77,6 @@ private:
     };
 
     bool EnsureCreated(uint32_t width, uint32_t height);
-    std::shared_ptr<Texture> CreateUavTexture(DXGI_FORMAT format, uint32_t width, uint32_t height, const std::wstring& name) const;
     void Temporal(
         CommandList& commandList,
         const std::shared_ptr<Texture>& noisyRadiance,

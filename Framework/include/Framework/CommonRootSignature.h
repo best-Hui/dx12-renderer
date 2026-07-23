@@ -105,6 +105,10 @@ public:
 
     void UnbindMaterialShaderResourceViews(CommandList& commandList);
 
+//Modify Begin:2026-07-23 by BestHui
+    void UnbindComputeShaderResourceViews(CommandList& commandList);
+//Modify End
+
     static constexpr UINT MATERIAL_REGISTER_SPACE = 0u;
     static constexpr UINT MODEL_REGISTER_SPACE = 1u;
     static constexpr UINT PIPELINE_REGISTER_SPACE = 2u;

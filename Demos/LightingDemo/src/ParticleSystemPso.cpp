@@ -1,4 +1,4 @@
-﻿#include <ParticleSystemPso.h>
+#include <ParticleSystemPso.h>
 
 #include <DX12Library/Helpers.h>
 #include <d3d12.h>
@@ -52,7 +52,7 @@ ParticleSystemPso::ParticleSystemPso(const std::shared_ptr<CommonRootSignature>&
     auto shader = std::make_shared<Shader>(rootSignature,
         ShaderBlob(L"LightingDemo_ParticleSystem_VS.cso"),
         ShaderBlob(L"LightingDemo_ParticleSystem_PS.cso"),
-        [](PipelineStateBuilder& builder)
+        [](RasterPipelineStateBuilder& builder)
         {
             constexpr size_t inputElementsCount = VertexAttributes::INPUT_ELEMENT_COUNT + INSTANCE_INPUT_ELEMENT_COUNT;
             std::vector<D3D12_INPUT_ELEMENT_DESC> inputElements(inputElementsCount);

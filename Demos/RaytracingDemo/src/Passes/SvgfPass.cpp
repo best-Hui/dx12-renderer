@@ -6,6 +6,7 @@
 #include <DX12Library/Texture.h>
 #include <Framework/CommonRootSignature.h>
 #include <Framework/ComputeShader.h>
+#include <Framework/RenderTexture.h>
 #include <Framework/ShaderBlob.h>
 #include <Framework/ShaderResourceView.h>
 #include <Framework/UnorderedAccessView.h>
@@ -28,24 +29,6 @@ void SvgfPass::ResetHistory()
     m_HistoryValid = false;
 }
 
-std::shared_ptr<Texture> SvgfPass::CreateUavTexture(
-    const DXGI_FORMAT format,
-    const uint32_t width,
-    const uint32_t height,
-    const std::wstring& name) const
-{
-    const auto desc = CD3DX12_RESOURCE_DESC::Tex2D(
-        format,
-        width,
-        height,
-        1,
-        1,
-        1,
-        0,
-        D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
-    return std::make_shared<Texture>(desc, nullptr, TextureUsageType::Other, name);
-}
-
 bool SvgfPass::EnsureCreated(const uint32_t width, const uint32_t height)
 {
     if (m_Width == width && m_Height == height && m_TemporalColor != nullptr)
@@ -58,15 +41,15 @@ bool SvgfPass::EnsureCreated(const uint32_t width, const uint32_t height)
     m_HistoryIndex = 0;
     m_HistoryValid = false;
 
-    m_HistoryColor[0] = CreateUavTexture(DXGI_FORMAT_R32G32B32A32_FLOAT, width, height, L"SVGF History Color 0");
-    m_HistoryColor[1] = CreateUavTexture(DXGI_FORMAT_R32G32B32A32_FLOAT, width, height, L"SVGF History Color 1");
-    m_HistoryMoments[0] = CreateUavTexture(DXGI_FORMAT_R32G32_FLOAT, width, height, L"SVGF History Moments 0");
-    m_HistoryMoments[1] = CreateUavTexture(DXGI_FORMAT_R32G32_FLOAT, width, height, L"SVGF History Moments 1");
-    m_TemporalColor = CreateUavTexture(DXGI_FORMAT_R32G32B32A32_FLOAT, width, height, L"SVGF Temporal Color");
-    m_TemporalMoments = CreateUavTexture(DXGI_FORMAT_R32G32_FLOAT, width, height, L"SVGF Temporal Moments");
-    m_Variance = CreateUavTexture(DXGI_FORMAT_R32_FLOAT, width, height, L"SVGF Variance");
-    m_AtrousPing = CreateUavTexture(DXGI_FORMAT_R32G32B32A32_FLOAT, width, height, L"SVGF Atrous Ping");
-    m_AtrousPong = CreateUavTexture(DXGI_FORMAT_R32G32B32A32_FLOAT, width, height, L"SVGF Atrous Pong");
+    m_HistoryColor[0] = RenderTexture::CreateUav2D(DXGI_FORMAT_R32G32B32A32_FLOAT, width, height, L"SVGF History Color 0");
+    m_HistoryColor[1] = RenderTexture::CreateUav2D(DXGI_FORMAT_R32G32B32A32_FLOAT, width, height, L"SVGF History Color 1");
+    m_HistoryMoments[0] = RenderTexture::CreateUav2D(DXGI_FORMAT_R32G32_FLOAT, width, height, L"SVGF History Moments 0");
+    m_HistoryMoments[1] = RenderTexture::CreateUav2D(DXGI_FORMAT_R32G32_FLOAT, width, height, L"SVGF History Moments 1");
+    m_TemporalColor = RenderTexture::CreateUav2D(DXGI_FORMAT_R32G32B32A32_FLOAT, width, height, L"SVGF Temporal Color");
+    m_TemporalMoments = RenderTexture::CreateUav2D(DXGI_FORMAT_R32G32_FLOAT, width, height, L"SVGF Temporal Moments");
+    m_Variance = RenderTexture::CreateUav2D(DXGI_FORMAT_R32_FLOAT, width, height, L"SVGF Variance");
+    m_AtrousPing = RenderTexture::CreateUav2D(DXGI_FORMAT_R32G32B32A32_FLOAT, width, height, L"SVGF Atrous Ping");
+    m_AtrousPong = RenderTexture::CreateUav2D(DXGI_FORMAT_R32G32B32A32_FLOAT, width, height, L"SVGF Atrous Pong");
     return true;
 }
 
@@ -96,14 +79,14 @@ void SvgfPass::Temporal(
     m_RootSignature->SetComputeShaderResourceView(commandList, 0, ShaderResourceView(noisyRadiance));
     m_RootSignature->SetComputeShaderResourceView(commandList, 1, ShaderResourceView(gBufferNormal));
     m_RootSignature->SetComputeShaderResourceView(commandList, 2, ShaderResourceView(gBufferPosition));
-    m_RootSignature->SetComputeShaderResourceView(commandList, 3, ShaderResourceView(depthTexture, 0, 1, RaytracingDemoRenderGraph::CreateDepthSrvDesc()));
+    m_RootSignature->SetComputeShaderResourceView(commandList, 3, ShaderResourceView::DepthAsFloat(depthTexture));
     m_RootSignature->SetComputeShaderResourceView(commandList, 4, ShaderResourceView(m_HistoryColor[previousIndex]));
     m_RootSignature->SetComputeShaderResourceView(commandList, 5, ShaderResourceView(m_HistoryMoments[previousIndex]));
-    m_RootSignature->SetUnorderedAccessView(commandList, 0, UnorderedAccessView(m_TemporalColor));
-    m_RootSignature->SetUnorderedAccessView(commandList, 1, UnorderedAccessView(m_TemporalMoments));
-    m_RootSignature->SetUnorderedAccessView(commandList, 2, UnorderedAccessView(m_Variance));
-    m_RootSignature->SetUnorderedAccessView(commandList, 3, UnorderedAccessView(m_HistoryColor[nextIndex]));
-    m_RootSignature->SetUnorderedAccessView(commandList, 4, UnorderedAccessView(m_HistoryMoments[nextIndex]));
+    m_TemporalShader->SetUnorderedAccessView(commandList, "TemporalColor", UnorderedAccessView(m_TemporalColor));
+    m_TemporalShader->SetUnorderedAccessView(commandList, "TemporalMoments", UnorderedAccessView(m_TemporalMoments));
+    m_TemporalShader->SetUnorderedAccessView(commandList, "Variance", UnorderedAccessView(m_Variance));
+    m_TemporalShader->SetUnorderedAccessView(commandList, "OutHistoryColor", UnorderedAccessView(m_HistoryColor[nextIndex]));
+    m_TemporalShader->SetUnorderedAccessView(commandList, "OutHistoryMoments", UnorderedAccessView(m_HistoryMoments[nextIndex]));
     m_TemporalShader->Bind(commandList);
     commandList.Dispatch((width + 7u) / 8u, (height + 7u) / 8u, 1u);
 
@@ -141,8 +124,8 @@ std::shared_ptr<Texture> SvgfPass::Atrous(
         m_RootSignature->SetComputeShaderResourceView(commandList, 1, ShaderResourceView(m_Variance));
         m_RootSignature->SetComputeShaderResourceView(commandList, 2, ShaderResourceView(gBufferNormal));
         m_RootSignature->SetComputeShaderResourceView(commandList, 3, ShaderResourceView(gBufferPosition));
-        m_RootSignature->SetComputeShaderResourceView(commandList, 4, ShaderResourceView(depthTexture, 0, 1, RaytracingDemoRenderGraph::CreateDepthSrvDesc()));
-        m_RootSignature->SetUnorderedAccessView(commandList, 0, UnorderedAccessView(output));
+        m_RootSignature->SetComputeShaderResourceView(commandList, 4, ShaderResourceView::DepthAsFloat(depthTexture));
+        m_AtrousShader->SetUnorderedAccessView(commandList, "OutputColor", UnorderedAccessView(output));
         m_AtrousShader->Bind(commandList);
         commandList.Dispatch((width + 7u) / 8u, (height + 7u) / 8u, 1u);
 
@@ -167,8 +150,8 @@ void SvgfPass::Composite(
     m_RootSignature->Bind(commandList);
     m_RootSignature->SetComputeConstantBuffer(commandList, constants);
     m_RootSignature->SetComputeShaderResourceView(commandList, 0, ShaderResourceView(input));
-    m_RootSignature->SetComputeShaderResourceView(commandList, 1, ShaderResourceView(depthTexture, 0, 1, RaytracingDemoRenderGraph::CreateDepthSrvDesc()));
-    m_RootSignature->SetUnorderedAccessView(commandList, 0, UnorderedAccessView(output));
+    m_RootSignature->SetComputeShaderResourceView(commandList, 1, ShaderResourceView::DepthAsFloat(depthTexture));
+    m_CompositeShader->SetUnorderedAccessView(commandList, "Output", UnorderedAccessView(output));
     m_CompositeShader->Bind(commandList);
     commandList.Dispatch((width + 7u) / 8u, (height + 7u) / 8u, 1u);
 }

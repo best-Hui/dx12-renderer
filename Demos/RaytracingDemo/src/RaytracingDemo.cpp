@@ -13,7 +13,7 @@
 #include <Framework/GraphicsSettings.h>
 #include <Framework/Mesh.h>
 #include <Framework/ModelLoader.h>
-#include <Framework/PipelineStateBuilder.h>
+#include <Framework/RasterPipelineStateBuilder.h>
 #include <Framework/ShaderBlob.h>
 
 #include <RenderGraph/RenderMetadata.h>
@@ -130,37 +130,25 @@ bool RaytracingDemo::LoadContent()
         m_RootSignature,
         ShaderBlob(L"GBuffer.vs.cso"),
         ShaderBlob(L"GBuffer.ps.cso"),
-        [](PipelineStateBuilder&) {},
+        [](RasterPipelineStateBuilder&) {},
         false);
 
     m_SkyboxShader = std::make_shared<Shader>(
         m_RootSignature,
         ShaderBlob(L"Skybox.vs.cso"),
         ShaderBlob(L"Skybox.ps.cso"),
-        [](PipelineStateBuilder& builder)
+        [](RasterPipelineStateBuilder& builder)
         {
-            auto rasterizer = CD3DX12_RASTERIZER_DESC(D3D12_FILL_MODE_SOLID, D3D12_CULL_MODE_FRONT, FALSE, 0, 0,
-                0, TRUE, FALSE, FALSE, 0, D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF);
-            auto depthStencil = CD3DX12_DEPTH_STENCIL_DESC(CD3DX12_DEFAULT());
-            depthStencil.DepthEnable = true;
-            depthStencil.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
-
-            builder.WithRasterizer(rasterizer).WithDepthStencil(depthStencil);
+            builder.WithFrontFaceCull().WithDepthTestNoWrite();
         },
         false);
 
-    RayTracingPipelineDesc rayTracingDesc = RayTracingShader::CreateDefaultPipelineDesc();
-    rayTracingDesc.Bindings.push_back({ "GBufferTextures", RayTracingShaderBindingType::TextureArray, 0, 4, 5 });
-    rayTracingDesc.Bindings.push_back({ "Skybox", RayTracingShaderBindingType::TextureArray, 0, 5, 1 });
-    rayTracingDesc.Bindings.push_back({ "DepthTexture", RayTracingShaderBindingType::TextureArray, 0, 6, 1 });
-    rayTracingDesc.Bindings.push_back({ "DirectionalLights", RayTracingShaderBindingType::StructuredBuffer, 3, 0, 1 });
-    rayTracingDesc.Bindings.push_back({ "PointLights", RayTracingShaderBindingType::StructuredBuffer, 4, 0, 1 });
-    rayTracingDesc.Bindings.push_back({ "AreaLights", RayTracingShaderBindingType::StructuredBuffer, 5, 0, 1 });
-    rayTracingDesc.Bindings.push_back({ "Accumulation", RayTracingShaderBindingType::OutputTexture, 1, 0, 1 });
-    rayTracingDesc.Bindings.push_back({ "NrdNoisyRadiance", RayTracingShaderBindingType::OutputTexture, 2, 0, 1 });
-    rayTracingDesc.PayloadSizeInBytes = 64;
-    m_RayTracingShader = std::make_unique<RayTracingShader>(ShaderBlob(L"PathTracing.rt.cso"), rayTracingDesc);
-    m_InlinePathTracingShader = std::make_unique<ComputeShader>(m_RootSignature, ShaderBlob(L"InlinePathTracing.cs.cso"), false);
+    const ShaderBlob pathTracingShader(L"PathTracing.rt.cso");
+    const RayTracingPipelineDesc rayTracingDesc = RayTracingPipelineDescBuilder::ReflectedDefault(pathTracingShader)
+        .WithPayloadSize(64)
+        .Build();
+    m_RayTracingShader = std::make_unique<RayTracingShader>(pathTracingShader, rayTracingDesc);
+    m_InlinePathTracingShader = std::make_unique<ComputeShader>(m_RootSignature, ShaderBlob(L"InlinePathTracing.cs.cso"));
     m_NrdPass = std::make_unique<NrdPass>(m_RootSignature);
     m_SvgfPass = std::make_unique<SvgfPass>(m_RootSignature);
     ApplyDenoiserSelection();
@@ -213,15 +201,7 @@ void RaytracingDemo::BindRayTracingShaderResources()
     m_RayTracingShader->SetStructuredBuffer("PointLights", m_PointLightBuffer);
     m_RayTracingShader->SetStructuredBuffer("AreaLights", m_AreaLightBuffer);
     m_RayTracingShader->SetTextureArray("Textures", m_Textures);
-
-    D3D12_SHADER_RESOURCE_VIEW_DESC skyboxSrvDesc = {};
-    skyboxSrvDesc.Format = m_SkyboxTexture->GetD3D12ResourceDesc().Format;
-    skyboxSrvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    skyboxSrvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
-    skyboxSrvDesc.TextureCube.MipLevels = 1;
-    skyboxSrvDesc.TextureCube.MostDetailedMip = 0;
-    skyboxSrvDesc.TextureCube.ResourceMinLODClamp = 0.0f;
-    m_RayTracingShader->SetTextureArray("Skybox", { m_SkyboxTexture }, { skyboxSrvDesc });
+    m_RayTracingShader->SetTextureArray("Skybox", { ShaderResourceView::TextureCube(m_SkyboxTexture) });
 }
 
 RaytracingDemo::CameraConstants RaytracingDemo::BuildCameraConstants() const
@@ -831,8 +811,6 @@ namespace
 
         const size_t elementCount = clampedEnd - clampedBegin;
         const uint64_t destinationOffset = static_cast<uint64_t>(clampedBegin * sizeof(T));
-        commandList.TransitionBarrier(destination, D3D12_RESOURCE_STATE_COPY_DEST);
-        commandList.FlushResourceBarriers();
         uploadBuffer.Upload(commandList, destination, values.data() + clampedBegin, elementCount * sizeof(T), sizeof(T), destinationOffset);
     }
 }

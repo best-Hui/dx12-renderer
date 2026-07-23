@@ -155,7 +155,7 @@ bool AnimationsDemo::LoadContent()
 	auto modelShader = std::make_shared<Shader>(m_RootSignature,
 		ShaderBlob(L"AnimationsDemo_VS.cso"),
 		ShaderBlob(L"AnimationsDemo_PS.cso"),
-		[](PipelineStateBuilder& builder)
+		[](RasterPipelineStateBuilder& builder)
 		{
 			std::vector<D3D12_INPUT_ELEMENT_DESC> inputLayout;
 			inputLayout.insert(inputLayout.end(), std::begin(VertexAttributes::INPUT_ELEMENTS), std::end(VertexAttributes::INPUT_ELEMENTS));
@@ -169,7 +169,7 @@ bool AnimationsDemo::LoadContent()
 		auto shader = std::make_shared<Shader>(m_RootSignature,
 			ShaderBlob(L"AnimationsDemo_Bone_VS.cso"),
 			ShaderBlob(L"AnimationsDemo_Bone_PS.cso"),
-			[](PipelineStateBuilder& builder)
+			[](RasterPipelineStateBuilder& builder)
 			{
 				builder
 					.WithRasterizer(CD3DX12_RASTERIZER_DESC(D3D12_FILL_MODE_WIREFRAME, D3D12_CULL_MODE_BACK, FALSE, 0, 0,

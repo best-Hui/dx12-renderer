@@ -33,7 +33,7 @@ BloomUpsample::BloomUpsample(const std::shared_ptr<CommonRootSignature>& rootSig
 	auto shader = std::make_shared<Shader>(rootSignature,
 		ShaderBlob(ShaderBytecode_Blit_VS, sizeof ShaderBytecode_Blit_VS),
 		ShaderBlob(ShaderBytecode_Bloom_Downsample_PS, sizeof ShaderBytecode_Bloom_Downsample_PS),
-		[](PipelineStateBuilder& builder)
+		[](RasterPipelineStateBuilder& builder)
 		{
 			builder.WithAdditiveBlend();
 		}

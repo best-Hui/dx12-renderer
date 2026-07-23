@@ -1,17 +1,17 @@
-#include "PipelineStateBuilder.h"
+#include "RasterPipelineStateBuilder.h"
 #include <DX12Library/Helpers.h>
 #include <Framework/Mesh.h>
 
 static constexpr UINT MAX_RENDER_TARGETS = _countof(D3D12_RT_FORMAT_ARRAY::RTFormats);
 
-PipelineStateBuilder::PipelineStateBuilder(const std::shared_ptr<RootSignature> rootSignature)
+RasterPipelineStateBuilder::RasterPipelineStateBuilder(const std::shared_ptr<RootSignature> rootSignature)
     : m_RootSignature(rootSignature)
     , m_InputLayout(VertexAttributes::INPUT_ELEMENT_COUNT)
 {
     memcpy(m_InputLayout.data(), VertexAttributes::INPUT_ELEMENTS, sizeof(VertexAttributes::INPUT_ELEMENTS));
 }
 
-Microsoft::WRL::ComPtr<ID3D12PipelineState> PipelineStateBuilder::Build(Microsoft::WRL::ComPtr<ID3D12Device2> device) const
+Microsoft::WRL::ComPtr<ID3D12PipelineState> RasterPipelineStateBuilder::Build(Microsoft::WRL::ComPtr<ID3D12Device2> device) const
 {
     Assert(m_VertexShader != nullptr, "Vertex Shader cannot be null.");
     Assert(m_PixelShader != nullptr, "Pixel Shader cannot be null.");
@@ -63,7 +63,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> PipelineStateBuilder::Build(Microsof
     return pipelineState;
 }
 
-PipelineStateBuilder& PipelineStateBuilder::WithRenderTargetFormats(const std::vector<DXGI_FORMAT>& renderTargetFormats, DXGI_FORMAT depthStencilFormat)
+RasterPipelineStateBuilder& RasterPipelineStateBuilder::WithRenderTargetFormats(const std::vector<DXGI_FORMAT>& renderTargetFormats, DXGI_FORMAT depthStencilFormat)
 {
     Assert(renderTargetFormats.size() < MAX_RENDER_TARGETS, "Too many render target formats.");
 
@@ -72,13 +72,13 @@ PipelineStateBuilder& PipelineStateBuilder::WithRenderTargetFormats(const std::v
     return *this;
 }
 
-PipelineStateBuilder& PipelineStateBuilder::WithSampleDesc(const DXGI_SAMPLE_DESC& sampleDesc)
+RasterPipelineStateBuilder& RasterPipelineStateBuilder::WithSampleDesc(const DXGI_SAMPLE_DESC& sampleDesc)
 {
     m_SampleDesc = sampleDesc;
     return *this;
 }
 
-PipelineStateBuilder& PipelineStateBuilder::WithShaders(const Microsoft::WRL::ComPtr<ID3DBlob>& vertexShader, const Microsoft::WRL::ComPtr<ID3DBlob>& pixelShader)
+RasterPipelineStateBuilder& RasterPipelineStateBuilder::WithShaders(const Microsoft::WRL::ComPtr<ID3DBlob>& vertexShader, const Microsoft::WRL::ComPtr<ID3DBlob>& pixelShader)
 {
     Assert(vertexShader != nullptr, "Vertex Shader cannot be null.");
     Assert(pixelShader != nullptr, "Pixel Shader cannot be null.");
@@ -88,13 +88,13 @@ PipelineStateBuilder& PipelineStateBuilder::WithShaders(const Microsoft::WRL::Co
     return *this;
 }
 
-PipelineStateBuilder& PipelineStateBuilder::WithBlend(const CD3DX12_BLEND_DESC& blendDesc)
+RasterPipelineStateBuilder& RasterPipelineStateBuilder::WithBlend(const CD3DX12_BLEND_DESC& blendDesc)
 {
     m_BlendDesc = blendDesc;
     return *this;
 }
 
-PipelineStateBuilder& PipelineStateBuilder::WithAlphaBlend()
+RasterPipelineStateBuilder& RasterPipelineStateBuilder::WithAlphaBlend()
 {
     auto blendDesc = CD3DX12_BLEND_DESC(CD3DX12_DEFAULT());
     auto& rtBlendDesc = blendDesc.RenderTarget[0];
@@ -110,7 +110,7 @@ PipelineStateBuilder& PipelineStateBuilder::WithAlphaBlend()
     return WithBlend(blendDesc);
 }
 
-PipelineStateBuilder& PipelineStateBuilder::WithAdditiveBlend()
+RasterPipelineStateBuilder& RasterPipelineStateBuilder::WithAdditiveBlend()
 {
     auto blendDesc = CD3DX12_BLEND_DESC(CD3DX12_DEFAULT());
     auto& rtBlendDesc = blendDesc.RenderTarget[0];
@@ -124,32 +124,63 @@ PipelineStateBuilder& PipelineStateBuilder::WithAdditiveBlend()
     return WithBlend(blendDesc);
 }
 
-PipelineStateBuilder& PipelineStateBuilder::WithDepthStencil(const CD3DX12_DEPTH_STENCIL_DESC& depthStencil)
+RasterPipelineStateBuilder& RasterPipelineStateBuilder::WithDepthStencil(const CD3DX12_DEPTH_STENCIL_DESC& depthStencil)
 {
     m_DepthStencilDesc = depthStencil;
     return *this;
 }
 
-PipelineStateBuilder& PipelineStateBuilder::WithDisabledDepthStencil()
+RasterPipelineStateBuilder& RasterPipelineStateBuilder::WithDisabledDepthStencil()
 {
     return WithDepthStencil({});
 }
 
-PipelineStateBuilder& PipelineStateBuilder::WithDisabledDepthWrite()
+RasterPipelineStateBuilder& RasterPipelineStateBuilder::WithDisabledDepthWrite()
 {
     auto desc = CD3DX12_DEPTH_STENCIL_DESC(CD3DX12_DEFAULT{});
     desc.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
     return WithDepthStencil(desc);
 }
 
-PipelineStateBuilder& PipelineStateBuilder::WithInputLayout(const std::vector<D3D12_INPUT_ELEMENT_DESC>& inputLayout)
+//Modify Begin:2026-07-23 by BestHui
+RasterPipelineStateBuilder& RasterPipelineStateBuilder::WithDepthTestNoWrite()
+{
+    return WithDisabledDepthWrite();
+}
+//Modify End
+
+RasterPipelineStateBuilder& RasterPipelineStateBuilder::WithInputLayout(const std::vector<D3D12_INPUT_ELEMENT_DESC>& inputLayout)
 {
     m_InputLayout = inputLayout;
     return *this;
 }
 
-PipelineStateBuilder& PipelineStateBuilder::WithRasterizer(const CD3DX12_RASTERIZER_DESC& rasterizer)
+RasterPipelineStateBuilder& RasterPipelineStateBuilder::WithRasterizer(const CD3DX12_RASTERIZER_DESC& rasterizer)
 {
     m_RasterizerDesc = rasterizer;
     return *this;
 }
+
+//Modify Begin:2026-07-23 by BestHui
+RasterPipelineStateBuilder& RasterPipelineStateBuilder::WithFrontFaceCull()
+{
+    auto rasterizer = CD3DX12_RASTERIZER_DESC(CD3DX12_DEFAULT{});
+    rasterizer.CullMode = D3D12_CULL_MODE_FRONT;
+    return WithRasterizer(rasterizer);
+}
+
+RasterPipelineStateBuilder& RasterPipelineStateBuilder::WithNoCull()
+{
+    auto rasterizer = CD3DX12_RASTERIZER_DESC(CD3DX12_DEFAULT{});
+    rasterizer.CullMode = D3D12_CULL_MODE_NONE;
+    return WithRasterizer(rasterizer);
+}
+
+RasterPipelineStateBuilder& RasterPipelineStateBuilder::WithWireframeNoCull()
+{
+    auto rasterizer = CD3DX12_RASTERIZER_DESC(CD3DX12_DEFAULT{});
+    rasterizer.FillMode = D3D12_FILL_MODE_WIREFRAME;
+    rasterizer.CullMode = D3D12_CULL_MODE_NONE;
+    return WithRasterizer(rasterizer);
+}
+//Modify End

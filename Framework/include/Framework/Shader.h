@@ -16,8 +16,11 @@
 #include <vector>
 
 #include "ShaderResourceView.h"
-#include "PipelineStateBuilder.h"
+#include "RasterPipelineStateBuilder.h"
 #include "ShaderBlob.h"
+//Modify Begin:2026-07-23 by BestHui
+#include "UnorderedAccessView.h"
+//Modify End
 
 class Shader
 {
@@ -26,7 +29,7 @@ public:
 		const std::shared_ptr<CommonRootSignature>& rootSignature,
 		const ShaderBlob& vertexShaderPath, const ShaderBlob& pixelShaderPath,
 //Modify Begin:2026-07-21 by BestHui
-		const std::function<void(PipelineStateBuilder&)> buildPipelineState = [](PipelineStateBuilder&) {},
+		const std::function<void(RasterPipelineStateBuilder&)> buildPipelineState = [](RasterPipelineStateBuilder&) {},
 		bool collectMetadata = true
 //Modify End
 	);
@@ -54,6 +57,9 @@ public:
 	void SetMaterialConstantBuffer(CommandList& commandList, size_t size, const void* data);
 
 	void SetShaderResourceView(CommandList& commandList, const std::string& variableName, const ShaderResourceView& shaderResourceView);
+//Modify Begin:2026-07-23 by BestHui
+	void SetUnorderedAccessView(CommandList& commandList, const std::string& variableName, const UnorderedAccessView& unorderedAccessView);
+//Modify End
 
 	struct ShaderMetadata
 	{
@@ -64,6 +70,11 @@ public:
 
 		std::vector<ShaderUtils::ShaderResourceViewMetadata> m_ShaderResourceViews{};
 		NameCacheMap m_ShaderResourceViewsNameCache{};
+//Modify Begin:2026-07-23 by BestHui
+
+		std::vector<ShaderUtils::UnorderedAccessViewMetadata> m_UnorderedAccessViews{};
+		NameCacheMap m_UnorderedAccessViewsNameCache{};
+//Modify End
 	};
 
 	const ShaderMetadata& GetVertexShaderMetadata() const { return m_VertexShaderMetadata; }
@@ -81,6 +92,6 @@ private:
 	ShaderMetadata m_VertexShaderMetadata;
 	ShaderMetadata m_PixelShaderMetadata;
 
-	PipelineStateBuilder m_PipelineStateBuilder;
+	RasterPipelineStateBuilder m_PipelineStateBuilder;
 	std::unordered_map<RenderTargetState, Microsoft::WRL::ComPtr<ID3D12PipelineState>> m_PipelineStateObjects;
 };

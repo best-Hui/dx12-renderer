@@ -298,6 +298,13 @@ void CommonRootSignature::UnbindMaterialShaderResourceViews(CommandList& command
     }
 }
 
+//Modify Begin:2026-07-23 by BestHui
+void CommonRootSignature::UnbindComputeShaderResourceViews(CommandList& commandList)
+{
+    UnbindMaterialShaderResourceViews(commandList);
+}
+//Modify End
+
 void CommonRootSignature::CombineRootSignatureFlags(D3D12_ROOT_SIGNATURE_FLAGS rootSignatureFlags, const std::vector<RootParameter>& rootParameters)
 {
     if (!CheckRootParametersVisiblity(rootParameters, D3D12_SHADER_VISIBILITY_VERTEX))

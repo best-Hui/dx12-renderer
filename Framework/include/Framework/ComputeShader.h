@@ -12,6 +12,7 @@
 //Modify End
 
 #include "CommonRootSignature.h"
+#include "ComputePipelineStateBuilder.h"
 #include "ShaderBlob.h"
 //Modify Begin:2026-07-23 by BestHui
 #include "ShaderResourceView.h"
@@ -59,11 +60,14 @@ public:
     void SetComputeConstantBuffer(CommandList& commandList, size_t size, const void* data) const;
 
     void SetShaderResourceView(CommandList& commandList, const std::string& variableName, const ShaderResourceView& shaderResourceView) const;
+    void SetShaderResourceView(CommandList& commandList, const std::string& variableName, UINT arrayIndex, const ShaderResourceView& shaderResourceView) const;
+    void SetShaderResourceView(CommandList& commandList, const std::string& variableName, UINT arrayIndex, const Resource& resource, D3D12_RESOURCE_STATES stateAfter = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE) const;
 
     void SetPipelineShaderResourceView(CommandList& commandList, UINT index, const ShaderResourceView& shaderResourceView) const;
-    void SetPipelineShaderResourceView(CommandList& commandList, UINT index, const Resource& resource, D3D12_RESOURCE_STATES stateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE) const;
+    void SetPipelineShaderResourceView(CommandList& commandList, UINT index, const Resource& resource, D3D12_RESOURCE_STATES stateAfter = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE) const;
     void SetComputeShaderResourceView(CommandList& commandList, UINT index, const ShaderResourceView& shaderResourceView) const;
     void SetUnorderedAccessView(CommandList& commandList, UINT index, const UnorderedAccessView& unorderedAccessView) const;
+    void SetUnorderedAccessView(CommandList& commandList, const std::string& variableName, const UnorderedAccessView& unorderedAccessView) const;
     void SetAccelerationStructure(CommandList& commandList, const RayTracingAccelerationStructure& accelerationStructure) const;
 
     struct ShaderMetadata
@@ -75,6 +79,9 @@ public:
 
         std::vector<ShaderUtils::ShaderResourceViewMetadata> m_ShaderResourceViews{};
         NameCacheMap m_ShaderResourceViewsNameCache{};
+
+        std::vector<ShaderUtils::UnorderedAccessViewMetadata> m_UnorderedAccessViews{};
+        NameCacheMap m_UnorderedAccessViewsNameCache{};
     };
 
     const ShaderMetadata& GetShaderMetadata() const { return m_ShaderMetadata; }
@@ -87,6 +94,7 @@ private:
     void CollectShaderMetadata(const Microsoft::WRL::ComPtr<ID3DBlob>& shader, ShaderMetadata* outMetadata);
 
     std::shared_ptr<CommonRootSignature> m_RootSignature;
+    ComputePipelineStateBuilder m_PipelineStateBuilder;
     Microsoft::WRL::ComPtr<ID3DBlob> m_Shader;
     ShaderMetadata m_ShaderMetadata;
     mutable Microsoft::WRL::ComPtr<ID3D12PipelineState> m_PipelineState;

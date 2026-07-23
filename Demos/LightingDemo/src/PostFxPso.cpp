@@ -18,7 +18,7 @@ PostFxPso::PostFxPso(const std::shared_ptr<CommonRootSignature>& rootSignature, 
     auto shader = std::make_shared<Shader>(rootSignature,
         ShaderBlob(L"LightingDemo_Blit_VS.cso"),
         ShaderBlob(L"LightingDemo_PostFX_PS.cso"),
-        [](PipelineStateBuilder& builder)
+        [](RasterPipelineStateBuilder& builder)
         {
             builder.WithRasterizer(CD3DX12_RASTERIZER_DESC(D3D12_FILL_MODE_SOLID, D3D12_CULL_MODE_BACK, FALSE, 0, 0,
                 0, TRUE, FALSE, FALSE, 0,

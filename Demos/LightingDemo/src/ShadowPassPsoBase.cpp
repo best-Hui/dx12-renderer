@@ -20,7 +20,7 @@ ShadowPassPsoBase::ShadowPassPsoBase(const std::shared_ptr<CommonRootSignature>&
     auto shader = std::make_shared<Shader>(rootSignature,
         ShaderBlob(L"LightingDemo_ShadowCaster_VS.cso"),
         ShaderBlob(L"LightingDemo_ShadowCaster_PS.cso"),
-        [](PipelineStateBuilder& builder)
+        [](RasterPipelineStateBuilder& builder)
         {
             // ColorMask 0
             auto blendDesc = CD3DX12_BLEND_DESC(CD3DX12_DEFAULT());

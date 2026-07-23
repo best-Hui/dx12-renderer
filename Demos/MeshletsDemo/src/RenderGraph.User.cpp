@@ -214,7 +214,7 @@ std::unique_ptr<RenderGraph::RenderGraphRoot> RenderGraph::User::Create(
             pBlitMesh, pRootSignature,
             pDownsampleHDB=std::make_shared<Shader>(pRootSignature,
                 ShaderBlob(ShaderBytecode_Blit_VS, sizeof(ShaderBytecode_Blit_VS)), ShaderBlob(L"HDB_Downsample_PS.cso"),
-                [](PipelineStateBuilder& psb)
+                [](RasterPipelineStateBuilder& psb)
                 {
                     auto desc = CD3DX12_DEPTH_STENCIL_DESC(CD3DX12_DEFAULT{});
                     desc.DepthFunc = D3D12_COMPARISON_FUNC_ALWAYS;
@@ -413,7 +413,7 @@ std::unique_ptr<RenderGraph::RenderGraphRoot> RenderGraph::User::Create(
         }
     ));
 
-    const auto debugGeometryPsb = [](PipelineStateBuilder& psb)
+    const auto debugGeometryPsb = [](RasterPipelineStateBuilder& psb)
     {
         auto desc = CD3DX12_RASTERIZER_DESC(CD3DX12_DEFAULT{});
         desc.FillMode = D3D12_FILL_MODE_WIREFRAME;

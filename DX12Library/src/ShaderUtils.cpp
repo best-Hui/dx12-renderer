@@ -6,6 +6,8 @@
 #include "Helpers.h"
 #include "Application.h"
 
+#include <unordered_set>
+
 namespace hlsl
 {
     // https://github.com/microsoft/DirectXShaderCompiler/blob/main/include/dxc/DxilContainer/DxilContainer.h
@@ -37,6 +39,55 @@ namespace hlsl
     };
 
 #undef DXIL_FOURCC
+}
+
+namespace
+{
+    std::string GetBaseResourceName(const char* name)
+    {
+        std::string result = name != nullptr ? name : "";
+        const size_t arraySuffix = result.find("[0]");
+        if (arraySuffix != std::string::npos)
+        {
+            result = result.substr(0, arraySuffix);
+        }
+        return result;
+    }
+
+    std::string BuildResourceKey(const std::string& name, const UINT bindPoint, const UINT space)
+    {
+        return name + "#" + std::to_string(bindPoint) + "#" + std::to_string(space);
+    }
+
+    bool IsShaderResourceViewType(const D3D_SHADER_INPUT_TYPE inputType)
+    {
+        switch (inputType)
+        {
+        case D3D_SIT_BYTEADDRESS:
+        case D3D_SIT_TEXTURE:
+        case D3D_SIT_STRUCTURED:
+        case D3D_SIT_RTACCELERATIONSTRUCTURE:
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    bool IsUnorderedAccessViewType(const D3D_SHADER_INPUT_TYPE inputType)
+    {
+        switch (inputType)
+        {
+        case D3D_SIT_UAV_RWTYPED:
+        case D3D_SIT_UAV_RWSTRUCTURED:
+        case D3D_SIT_UAV_RWBYTEADDRESS:
+        case D3D_SIT_UAV_APPEND_STRUCTURED:
+        case D3D_SIT_UAV_CONSUME_STRUCTURED:
+        case D3D_SIT_UAV_RWSTRUCTURED_WITH_COUNTER:
+            return true;
+        default:
+            return false;
+        }
+    }
 }
 
 
@@ -84,6 +135,24 @@ Microsoft::WRL::ComPtr<ID3D12ShaderReflection> ShaderUtils::Reflect(const Micros
     return reflection;
 }
 
+//Modify Begin:2026-07-23 by BestHui
+Microsoft::WRL::ComPtr<ID3D12LibraryReflection> ShaderUtils::ReflectLibrary(const Microsoft::WRL::ComPtr<ID3DBlob>& shaderSource)
+{
+    Microsoft::WRL::ComPtr<IDxcBlob> shaderSourceDxc;
+    ThrowIfFailed(shaderSource.As(&shaderSourceDxc));
+
+    Microsoft::WRL::ComPtr<IDxcContainerReflection> reflection;
+    UINT32 shaderIndex;
+    ThrowIfFailed(DxcCreateInstance(CLSID_DxcContainerReflection, IID_PPV_ARGS(&reflection)));
+    ThrowIfFailed(reflection->Load(shaderSourceDxc.Get()));
+    ThrowIfFailed(reflection->FindFirstPartKind(hlsl::DFCC_DXIL, &shaderIndex));
+
+    Microsoft::WRL::ComPtr<ID3D12LibraryReflection> libraryReflection;
+    ThrowIfFailed(reflection->GetPartReflection(shaderIndex, __uuidof(ID3D12LibraryReflection), reinterpret_cast<void**>(libraryReflection.GetAddressOf())));
+    return libraryReflection;
+}
+//Modify End
+
 std::vector<ShaderUtils::ConstantBufferMetadata> ShaderUtils::GetConstantBuffers(const Microsoft::WRL::ComPtr<ID3D12ShaderReflection>& shaderReflection)
 {
     // https://github.com/planetpratik/DirectXTutorials/blob/master/SimpleShader.cpp
@@ -99,8 +168,34 @@ std::vector<ShaderUtils::ConstantBufferMetadata> ShaderUtils::GetConstantBuffers
         D3D12_SHADER_BUFFER_DESC cbufferDesc;
         ThrowIfFailed(constantBuffer->GetDesc(&cbufferDesc));
 
-        D3D12_SHADER_INPUT_BIND_DESC inputBindDesc;
-        ThrowIfFailed(shaderReflection->GetResourceBindingDescByName(cbufferDesc.Name, &inputBindDesc));
+//Modify Begin:2026-07-23 by BestHui
+        D3D12_SHADER_INPUT_BIND_DESC inputBindDesc{};
+        HRESULT bindingResult = shaderReflection->GetResourceBindingDescByName(cbufferDesc.Name, &inputBindDesc);
+        if (FAILED(bindingResult))
+        {
+            bool foundBinding = false;
+            for (UINT resourceIndex = 0; resourceIndex < shaderDesc.BoundResources; ++resourceIndex)
+            {
+                D3D12_SHADER_INPUT_BIND_DESC resourceBindDesc{};
+                if (FAILED(shaderReflection->GetResourceBindingDesc(resourceIndex, &resourceBindDesc)))
+                {
+                    continue;
+                }
+
+                if (resourceBindDesc.Type == D3D_SIT_CBUFFER && cbufferDesc.Name == std::string(resourceBindDesc.Name))
+                {
+                    inputBindDesc = resourceBindDesc;
+                    foundBinding = true;
+                    break;
+                }
+            }
+
+            if (!foundBinding)
+            {
+                continue;
+            }
+        }
+//Modify End
 
         ConstantBufferMetadata constantBufferMetadata;
         constantBufferMetadata.Name = cbufferDesc.Name;
@@ -141,6 +236,78 @@ std::vector<ShaderUtils::ConstantBufferMetadata> ShaderUtils::GetConstantBuffers
     return result;
 }
 
+//Modify Begin:2026-07-23 by BestHui
+std::vector<ShaderUtils::ConstantBufferMetadata> ShaderUtils::GetConstantBuffers(const Microsoft::WRL::ComPtr<ID3D12LibraryReflection>& libraryReflection)
+{
+    D3D12_LIBRARY_DESC libraryDesc{};
+    ThrowIfFailed(libraryReflection->GetDesc(&libraryDesc));
+
+    std::vector<ShaderUtils::ConstantBufferMetadata> result;
+    std::unordered_set<std::string> visitedResources;
+
+    for (UINT functionIndex = 0; functionIndex < libraryDesc.FunctionCount; ++functionIndex)
+    {
+        ID3D12FunctionReflection* functionReflection = libraryReflection->GetFunctionByIndex(functionIndex);
+        if (functionReflection == nullptr)
+        {
+            continue;
+        }
+
+        D3D12_FUNCTION_DESC functionDesc{};
+        ThrowIfFailed(functionReflection->GetDesc(&functionDesc));
+
+        for (UINT cbufferIndex = 0; cbufferIndex < functionDesc.ConstantBuffers; ++cbufferIndex)
+        {
+            ID3D12ShaderReflectionConstantBuffer* constantBuffer = functionReflection->GetConstantBufferByIndex(cbufferIndex);
+            D3D12_SHADER_BUFFER_DESC cbufferDesc{};
+            ThrowIfFailed(constantBuffer->GetDesc(&cbufferDesc));
+
+            D3D12_SHADER_INPUT_BIND_DESC inputBindDesc{};
+            if (FAILED(functionReflection->GetResourceBindingDescByName(cbufferDesc.Name, &inputBindDesc)))
+            {
+                continue;
+            }
+            if (inputBindDesc.Type != D3D_SIT_CBUFFER)
+            {
+                continue;
+            }
+
+            const std::string name = GetBaseResourceName(cbufferDesc.Name);
+            const std::string key = BuildResourceKey(name, inputBindDesc.BindPoint, inputBindDesc.Space);
+            if (!visitedResources.insert(key).second)
+            {
+                continue;
+            }
+
+            ConstantBufferMetadata constantBufferMetadata;
+            constantBufferMetadata.Name = name;
+            constantBufferMetadata.RegisterIndex = inputBindDesc.BindPoint;
+            constantBufferMetadata.Space = inputBindDesc.Space;
+            constantBufferMetadata.Size = 0;
+            constantBufferMetadata.Variables.reserve(cbufferDesc.Variables);
+
+            for (UINT variableIndex = 0; variableIndex < cbufferDesc.Variables; ++variableIndex)
+            {
+                ID3D12ShaderReflectionVariable* variable = constantBuffer->GetVariableByIndex(variableIndex);
+                D3D12_SHADER_VARIABLE_DESC variableDesc{};
+                ThrowIfFailed(variable->GetDesc(&variableDesc));
+
+                ConstantBufferMetadata::Variable variableMetadata;
+                variableMetadata.Name = variableDesc.Name;
+                variableMetadata.Offset = variableDesc.StartOffset;
+                variableMetadata.Size = variableDesc.Size;
+                constantBufferMetadata.Size = max(constantBufferMetadata.Size, variableMetadata.Offset + variableMetadata.Size);
+                constantBufferMetadata.Variables.push_back(variableMetadata);
+            }
+
+            result.push_back(std::move(constantBufferMetadata));
+        }
+    }
+
+    return result;
+}
+//Modify End
+
 std::vector<ShaderUtils::ShaderResourceViewMetadata> ShaderUtils::GetShaderResourceViews(const Microsoft::WRL::ComPtr<ID3D12ShaderReflection>& shaderReflection)
 {
     // https://github.com/planetpratik/DirectXTutorials/blob/master/SimpleShader.cpp
@@ -155,21 +322,149 @@ std::vector<ShaderUtils::ShaderResourceViewMetadata> ShaderUtils::GetShaderResou
         D3D12_SHADER_INPUT_BIND_DESC inputBindDesc;
         ThrowIfFailed(shaderReflection->GetResourceBindingDesc(resourceIndex, &inputBindDesc));
 
-        switch (inputBindDesc.Type)
+        if (IsShaderResourceViewType(inputBindDesc.Type))
         {
-        case D3D_SIT_BYTEADDRESS:
-        case D3D_SIT_TEXTURE:
-        case D3D_SIT_STRUCTURED:
-            {
-                ShaderResourceViewMetadata resourceMetadata;
-                resourceMetadata.Name = inputBindDesc.Name;
-                resourceMetadata.RegisterIndex = inputBindDesc.BindPoint;
-                resourceMetadata.Space = inputBindDesc.Space;
-                result.push_back(resourceMetadata);
-                break;
-            }
+            ShaderResourceViewMetadata resourceMetadata;
+            resourceMetadata.Name = GetBaseResourceName(inputBindDesc.Name);
+            resourceMetadata.RegisterIndex = inputBindDesc.BindPoint;
+            resourceMetadata.Space = inputBindDesc.Space;
+//Modify Begin:2026-07-23 by BestHui
+            resourceMetadata.BindCount = inputBindDesc.BindCount;
+            resourceMetadata.InputType = inputBindDesc.Type;
+            resourceMetadata.Dimension = inputBindDesc.Dimension;
+//Modify End
+            result.push_back(resourceMetadata);
         }
     }
 
     return result;
 }
+
+//Modify Begin:2026-07-23 by BestHui
+std::vector<ShaderUtils::ShaderResourceViewMetadata> ShaderUtils::GetShaderResourceViews(const Microsoft::WRL::ComPtr<ID3D12LibraryReflection>& libraryReflection)
+{
+    D3D12_LIBRARY_DESC libraryDesc{};
+    ThrowIfFailed(libraryReflection->GetDesc(&libraryDesc));
+
+    std::vector<ShaderUtils::ShaderResourceViewMetadata> result;
+    std::unordered_set<std::string> visitedResources;
+
+    for (UINT functionIndex = 0; functionIndex < libraryDesc.FunctionCount; ++functionIndex)
+    {
+        ID3D12FunctionReflection* functionReflection = libraryReflection->GetFunctionByIndex(functionIndex);
+        if (functionReflection == nullptr)
+        {
+            continue;
+        }
+
+        D3D12_FUNCTION_DESC functionDesc{};
+        ThrowIfFailed(functionReflection->GetDesc(&functionDesc));
+
+        for (UINT resourceIndex = 0; resourceIndex < functionDesc.BoundResources; ++resourceIndex)
+        {
+            D3D12_SHADER_INPUT_BIND_DESC inputBindDesc{};
+            ThrowIfFailed(functionReflection->GetResourceBindingDesc(resourceIndex, &inputBindDesc));
+            if (!IsShaderResourceViewType(inputBindDesc.Type))
+            {
+                continue;
+            }
+
+            const std::string name = GetBaseResourceName(inputBindDesc.Name);
+            const std::string key = BuildResourceKey(name, inputBindDesc.BindPoint, inputBindDesc.Space);
+            if (!visitedResources.insert(key).second)
+            {
+                continue;
+            }
+
+            ShaderResourceViewMetadata resourceMetadata;
+            resourceMetadata.Name = name;
+            resourceMetadata.RegisterIndex = inputBindDesc.BindPoint;
+            resourceMetadata.Space = inputBindDesc.Space;
+            resourceMetadata.BindCount = inputBindDesc.BindCount;
+            resourceMetadata.InputType = inputBindDesc.Type;
+            resourceMetadata.Dimension = inputBindDesc.Dimension;
+            result.push_back(resourceMetadata);
+        }
+    }
+
+    return result;
+}
+
+std::vector<ShaderUtils::UnorderedAccessViewMetadata> ShaderUtils::GetUnorderedAccessViews(const Microsoft::WRL::ComPtr<ID3D12ShaderReflection>& shaderReflection)
+{
+    D3D12_SHADER_DESC shaderDesc;
+    ThrowIfFailed(shaderReflection->GetDesc(&shaderDesc));
+
+    std::vector<ShaderUtils::UnorderedAccessViewMetadata> result;
+    result.reserve(shaderDesc.BoundResources);
+
+    for (UINT resourceIndex = 0; resourceIndex < shaderDesc.BoundResources; ++resourceIndex)
+    {
+        D3D12_SHADER_INPUT_BIND_DESC inputBindDesc;
+        ThrowIfFailed(shaderReflection->GetResourceBindingDesc(resourceIndex, &inputBindDesc));
+
+        if (IsUnorderedAccessViewType(inputBindDesc.Type))
+        {
+            UnorderedAccessViewMetadata resourceMetadata;
+            resourceMetadata.Name = GetBaseResourceName(inputBindDesc.Name);
+            resourceMetadata.RegisterIndex = inputBindDesc.BindPoint;
+            resourceMetadata.Space = inputBindDesc.Space;
+            resourceMetadata.BindCount = inputBindDesc.BindCount;
+            resourceMetadata.InputType = inputBindDesc.Type;
+            resourceMetadata.Dimension = inputBindDesc.Dimension;
+            result.push_back(resourceMetadata);
+        }
+    }
+
+    return result;
+}
+
+std::vector<ShaderUtils::UnorderedAccessViewMetadata> ShaderUtils::GetUnorderedAccessViews(const Microsoft::WRL::ComPtr<ID3D12LibraryReflection>& libraryReflection)
+{
+    D3D12_LIBRARY_DESC libraryDesc{};
+    ThrowIfFailed(libraryReflection->GetDesc(&libraryDesc));
+
+    std::vector<ShaderUtils::UnorderedAccessViewMetadata> result;
+    std::unordered_set<std::string> visitedResources;
+
+    for (UINT functionIndex = 0; functionIndex < libraryDesc.FunctionCount; ++functionIndex)
+    {
+        ID3D12FunctionReflection* functionReflection = libraryReflection->GetFunctionByIndex(functionIndex);
+        if (functionReflection == nullptr)
+        {
+            continue;
+        }
+
+        D3D12_FUNCTION_DESC functionDesc{};
+        ThrowIfFailed(functionReflection->GetDesc(&functionDesc));
+
+        for (UINT resourceIndex = 0; resourceIndex < functionDesc.BoundResources; ++resourceIndex)
+        {
+            D3D12_SHADER_INPUT_BIND_DESC inputBindDesc{};
+            ThrowIfFailed(functionReflection->GetResourceBindingDesc(resourceIndex, &inputBindDesc));
+            if (!IsUnorderedAccessViewType(inputBindDesc.Type))
+            {
+                continue;
+            }
+
+            const std::string name = GetBaseResourceName(inputBindDesc.Name);
+            const std::string key = BuildResourceKey(name, inputBindDesc.BindPoint, inputBindDesc.Space);
+            if (!visitedResources.insert(key).second)
+            {
+                continue;
+            }
+
+            UnorderedAccessViewMetadata resourceMetadata;
+            resourceMetadata.Name = name;
+            resourceMetadata.RegisterIndex = inputBindDesc.BindPoint;
+            resourceMetadata.Space = inputBindDesc.Space;
+            resourceMetadata.BindCount = inputBindDesc.BindCount;
+            resourceMetadata.InputType = inputBindDesc.Type;
+            resourceMetadata.Dimension = inputBindDesc.Dimension;
+            result.push_back(resourceMetadata);
+        }
+    }
+
+    return result;
+}
+//Modify End

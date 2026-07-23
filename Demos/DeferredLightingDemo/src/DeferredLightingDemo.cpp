@@ -25,7 +25,7 @@ using namespace Microsoft::WRL;
 #include <Framework/MatricesCb.h>
 #include <Framework/Shader.h>
 #include <Framework/Material.h>
-#include <Framework/PipelineStateBuilder.h>
+#include <Framework/RasterPipelineStateBuilder.h>
 
 using namespace DirectX;
 
@@ -316,7 +316,7 @@ bool DeferredLightingDemo::LoadContent()
             auto shader = std::make_shared<Shader>(m_CommonRootSignature,
                 ShaderBlob(L"DeferredLightingDemo_LightBuffer_Directional_VS.cso"),
                 ShaderBlob(L"DeferredLightingDemo_LightBuffer_Directional_PS.cso"),
-                [](PipelineStateBuilder& builder)
+                [](RasterPipelineStateBuilder& builder)
                 {
                     builder
                         .WithAdditiveBlend()
@@ -333,7 +333,7 @@ bool DeferredLightingDemo::LoadContent()
                 m_CommonRootSignature,
                 ShaderBlob(L"DeferredLightingDemo_LightBuffer_LightStencil_VS.cso"),
                 ShaderBlob(L"DeferredLightingDemo_LightBuffer_LightStencil_PS.cso"),
-                [](PipelineStateBuilder& builder)
+                [](RasterPipelineStateBuilder& builder)
                 {
                     // https://ogldev.org/www/tutorial37/tutorial37.html
                     // no back-face culling
@@ -379,7 +379,7 @@ bool DeferredLightingDemo::LoadContent()
             return std::make_shared<Shader>(m_CommonRootSignature,
                 ShaderBlob(vertexShaderPath),
                 ShaderBlob(pixelShaderPath),
-                [](PipelineStateBuilder& builder)
+                [](RasterPipelineStateBuilder& builder)
                 {
                     auto depthStencil = CD3DX12_DEPTH_STENCIL_DESC(CD3DX12_DEFAULT());
                     depthStencil.DepthEnable = false; // do not read
@@ -445,7 +445,7 @@ bool DeferredLightingDemo::LoadContent()
             auto shader = std::make_shared<Shader>(m_CommonRootSignature,
                 ShaderBlob(L"DeferredLightingDemo_Skybox_VS.cso"),
                 ShaderBlob(L"DeferredLightingDemo_Skybox_PS.cso"),
-                [](PipelineStateBuilder& builder)
+                [](RasterPipelineStateBuilder& builder)
                 {
                     auto rasterizer = CD3DX12_RASTERIZER_DESC(D3D12_FILL_MODE_SOLID, D3D12_CULL_MODE_FRONT, FALSE, 0, 0,
                         0, TRUE, FALSE, FALSE, 0,

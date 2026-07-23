@@ -76,7 +76,7 @@ ImGuiImpl::ImGuiImpl(CommandList& commandList, const Window& window, const std::
     m_CombineShader = std::make_shared<Shader>(pRootSignature,
         ShaderBlob(ShaderBytecode_Blit_VS, sizeof ShaderBytecode_Blit_VS),
         ShaderBlob(ShaderBytecode_ImGuiCombine_PS, sizeof ShaderBytecode_ImGuiCombine_PS),
-        [](PipelineStateBuilder& psb)
+        [](RasterPipelineStateBuilder& psb)
         {
             psb.WithAlphaBlend();
         },

@@ -206,7 +206,7 @@ bool ToonDemo::LoadContent()
         auto toonShader = std::make_shared<Shader>(m_RootSignature,
             ShaderBlob(L"Toon_VS.cso"),
             ShaderBlob(L"Toon_PS.cso"),
-            [](PipelineStateBuilder& builder)
+            [](RasterPipelineStateBuilder& builder)
             {
                 auto dsDesc = CD3DX12_DEPTH_STENCIL_DESC(CD3DX12_DEFAULT());
                 dsDesc.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;

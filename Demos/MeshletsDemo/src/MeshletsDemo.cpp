@@ -188,7 +188,7 @@ bool MeshletsDemo::LoadContent()
                 const auto pCubeModel = modelLoader.LoadExisting(pMesh);
                 const auto pOccluderShader = std::make_shared<Shader>(m_RootSignature,
                     ShaderBlob(L"Occluder_VS.cso"), ShaderBlob(L"Occluder_PS.cso"),
-                    [](PipelineStateBuilder& psb)
+                    [](RasterPipelineStateBuilder& psb)
                     {
                         psb.WithDisabledDepthWrite();
                         psb.WithAlphaBlend();

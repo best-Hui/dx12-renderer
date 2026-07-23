@@ -24,7 +24,8 @@ set(HEADER_FILES
         "include/Framework/BloomDownsample.h"
         "include/Framework/BloomUpsample.h" 
         "include/Framework/CommonRootSignature.h" 
-        "include/Framework/PipelineStateBuilder.h" 
+        "include/Framework/ComputePipelineStateBuilder.h"
+        "include/Framework/RasterPipelineStateBuilder.h" 
         "include/Framework/Shader.h" 
         "include/Framework/Material.h" 
         "include/Framework/ShaderResourceView.h" 
@@ -32,6 +33,9 @@ set(HEADER_FILES
         "include/Framework/SharedUploadBuffer.h"
         "include/Framework/UnorderedAccessView.h"
         "include/Framework/ComputeShader.h"
+# Modify Begin:2026-07-23 by BestHui
+        "include/Framework/RenderTexture.h"
+# Modify End
 # Modify Begin:2026-07-21 by BestHui
         "include/Framework/RayTracingAccelerationStructure.h"
         "include/Framework/RayTracingPipelineStateBuilder.h"
@@ -64,12 +68,16 @@ set(SOURCE_FILES
         "src/BloomDownsample.cpp"
         "src/BloomUpsample.cpp" 
         "src/CommonRootSignature.cpp" 
-        "src/PipelineStateBuilder.cpp" 
+        "src/ComputePipelineStateBuilder.cpp"
+        "src/RasterPipelineStateBuilder.cpp" 
         "src/Shader.cpp" 
         "src/SharedUploadBuffer.cpp" 
         "src/Material.cpp" 
         "src/ShaderBlob.cpp"
         "src/ComputeShader.cpp"
+# Modify Begin:2026-07-23 by BestHui
+        "src/RenderTexture.cpp"
+# Modify End
 # Modify Begin:2026-07-21 by BestHui
         "src/RayTracingAccelerationStructure.cpp"
         "src/RayTracingPipelineStateBuilder.cpp"

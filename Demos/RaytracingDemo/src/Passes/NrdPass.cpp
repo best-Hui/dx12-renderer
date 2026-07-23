@@ -316,10 +316,10 @@ void NrdPass::PrepareInputs(
     m_RootSignature->SetComputeShaderResourceView(commandList, 0, ShaderResourceView(gBufferSpecularSmoothness));
     m_RootSignature->SetComputeShaderResourceView(commandList, 1, ShaderResourceView(gBufferNormal));
     m_RootSignature->SetComputeShaderResourceView(commandList, 2, ShaderResourceView(gBufferPosition));
-    m_RootSignature->SetComputeShaderResourceView(commandList, 3, ShaderResourceView(depthTexture, 0, 1, RaytracingDemoRenderGraph::CreateDepthSrvDesc()));
-    m_RootSignature->SetUnorderedAccessView(commandList, 0, UnorderedAccessView(nrdNormalRoughness));
-    m_RootSignature->SetUnorderedAccessView(commandList, 1, UnorderedAccessView(nrdViewZ));
-    m_RootSignature->SetUnorderedAccessView(commandList, 2, UnorderedAccessView(nrdMotion));
+    m_RootSignature->SetComputeShaderResourceView(commandList, 3, ShaderResourceView::DepthAsFloat(depthTexture));
+    m_PrepareShader->SetUnorderedAccessView(commandList, "NrdNormalRoughness", UnorderedAccessView(nrdNormalRoughness));
+    m_PrepareShader->SetUnorderedAccessView(commandList, "NrdViewZ", UnorderedAccessView(nrdViewZ));
+    m_PrepareShader->SetUnorderedAccessView(commandList, "NrdMotion", UnorderedAccessView(nrdMotion));
     m_PrepareShader->Bind(commandList);
     commandList.Dispatch((width + 7u) / 8u, (height + 7u) / 8u, 1u);
 }
@@ -508,8 +508,8 @@ void NrdPass::Composite(
     m_RootSignature->Bind(commandList);
     m_RootSignature->SetComputeConstantBuffer(commandList, constants);
     m_RootSignature->SetComputeShaderResourceView(commandList, 0, ShaderResourceView(denoisedRadiance));
-    m_RootSignature->SetComputeShaderResourceView(commandList, 1, ShaderResourceView(depthTexture, 0, 1, RaytracingDemoRenderGraph::CreateDepthSrvDesc()));
-    m_RootSignature->SetUnorderedAccessView(commandList, 0, UnorderedAccessView(output));
+    m_RootSignature->SetComputeShaderResourceView(commandList, 1, ShaderResourceView::DepthAsFloat(depthTexture));
+    m_CompositeShader->SetUnorderedAccessView(commandList, "Output", UnorderedAccessView(output));
     m_CompositeShader->Bind(commandList);
     commandList.Dispatch((width + 7u) / 8u, (height + 7u) / 8u, 1u);
 }

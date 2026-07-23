@@ -6,7 +6,7 @@ Shader::Shader(
     const std::shared_ptr<CommonRootSignature>& rootSignature,
     const ShaderBlob& vertexShader,
     const ShaderBlob& pixelShader,
-    const std::function<void(PipelineStateBuilder&)> buildPipelineState,
+    const std::function<void(RasterPipelineStateBuilder&)> buildPipelineState,
 //Modify Begin:2026-07-21 by BestHui
     bool collectMetadata)
 //Modify End
@@ -90,6 +90,44 @@ void Shader::SetShaderResourceView(CommandList& commandList, const std::string& 
     }
 }
 
+//Modify Begin:2026-07-23 by BestHui
+void Shader::SetUnorderedAccessView(CommandList& commandList, const std::string& variableName, const UnorderedAccessView& unorderedAccessView)
+{
+    const auto vsFindResult = m_VertexShaderMetadata.m_UnorderedAccessViewsNameCache.find(variableName);
+    const auto vsFound = vsFindResult != m_VertexShaderMetadata.m_UnorderedAccessViewsNameCache.end();
+    if (vsFound)
+    {
+        const auto index = vsFindResult->second;
+        const auto& uavMetadata = m_VertexShaderMetadata.m_UnorderedAccessViews[index];
+        if (uavMetadata.Space != CommonRootSignature::MATERIAL_REGISTER_SPACE)
+        {
+            throw std::exception("Invalid space index for a UAV.");
+        }
+
+        m_RootSignature->SetUnorderedAccessView(commandList, uavMetadata.RegisterIndex, unorderedAccessView);
+    }
+
+    const auto psFindResult = m_PixelShaderMetadata.m_UnorderedAccessViewsNameCache.find(variableName);
+    const auto psFound = psFindResult != m_PixelShaderMetadata.m_UnorderedAccessViewsNameCache.end();
+    if (psFound)
+    {
+        const auto index = psFindResult->second;
+        const auto& uavMetadata = m_PixelShaderMetadata.m_UnorderedAccessViews[index];
+        if (uavMetadata.Space != CommonRootSignature::MATERIAL_REGISTER_SPACE)
+        {
+            throw std::exception("Invalid space index for a UAV.");
+        }
+
+        m_RootSignature->SetUnorderedAccessView(commandList, uavMetadata.RegisterIndex, unorderedAccessView);
+    }
+
+    if (!vsFound && !psFound)
+    {
+        throw std::exception("Shader variable not found.");
+    }
+}
+//Modify End
+
 Microsoft::WRL::ComPtr<ID3D12PipelineState> Shader::GetPipelineState(const Microsoft::WRL::ComPtr<ID3D12Device2>& device, const RenderTargetState& renderTargetState)
 {
     auto findResult = m_PipelineStateObjects.find(renderTargetState);
@@ -139,4 +177,17 @@ void Shader::CollectShaderMetadata(const Microsoft::WRL::ComPtr<ID3DBlob>& shade
             outMetadata->m_ShaderResourceViewsNameCache.emplace(srvMetadata.Name, i);
         }
     }
+
+//Modify Begin:2026-07-23 by BestHui
+    // unordered access views
+    {
+        outMetadata->m_UnorderedAccessViews = std::move(ShaderUtils::GetUnorderedAccessViews(reflection));
+
+        for (size_t i = 0; i < outMetadata->m_UnorderedAccessViews.size(); ++i)
+        {
+            const auto& uavMetadata = outMetadata->m_UnorderedAccessViews[i];
+            outMetadata->m_UnorderedAccessViewsNameCache.emplace(uavMetadata.Name, i);
+        }
+    }
+//Modify End
 }

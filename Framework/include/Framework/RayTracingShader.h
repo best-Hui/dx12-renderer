@@ -2,6 +2,7 @@
 //Modify Begin:2026-07-21 by BestHui
 
 #include <Framework/RayTracingAccelerationStructure.h>
+#include <Framework/ShaderResourceView.h>
 
 #include <d3d12.h>
 
@@ -72,6 +73,55 @@ struct RayTracingPipelineDesc
     uint32_t MaxDescriptorCount = 2048;
 };
 
+//Modify Begin:2026-07-23 by BestHui
+class RayTracingPipelineDescBuilder
+{
+public:
+    RayTracingPipelineDescBuilder();
+    explicit RayTracingPipelineDescBuilder(RayTracingPipelineDesc desc);
+
+    static RayTracingPipelineDescBuilder Default();
+    static RayTracingPipelineDescBuilder ReflectedDefault(const ShaderBlob& shaderLibrary);
+
+    RayTracingPipelineDescBuilder& WithExport(std::wstring exportName);
+    RayTracingPipelineDescBuilder& WithTriangleHitGroup(
+        std::wstring hitGroupName,
+        std::wstring closestHitShader,
+        std::wstring anyHitShader = L"",
+        std::wstring intersectionShader = L"");
+    RayTracingPipelineDescBuilder& WithRayGenerationPass(
+        std::string passName,
+        std::wstring rayGenerationShader,
+        std::vector<std::wstring> missShaders,
+        std::vector<std::wstring> hitGroups);
+
+    RayTracingPipelineDescBuilder& WithOutputTexture(std::string name, uint32_t shaderRegister, uint32_t registerSpace = 0, uint32_t descriptorCount = 1);
+    RayTracingPipelineDescBuilder& WithAccelerationStructure(std::string name, uint32_t shaderRegister, uint32_t registerSpace = 0);
+    RayTracingPipelineDescBuilder& WithConstantBuffer(std::string name, uint32_t shaderRegister, uint32_t registerSpace = 0);
+    RayTracingPipelineDescBuilder& WithStructuredBuffer(std::string name, uint32_t shaderRegister, uint32_t registerSpace = 0);
+    RayTracingPipelineDescBuilder& WithTextureArray(std::string name, uint32_t shaderRegister, uint32_t registerSpace, uint32_t descriptorCount);
+    RayTracingPipelineDescBuilder& WithVertexBufferArray(std::string name, uint32_t shaderRegister, uint32_t registerSpace, uint32_t descriptorCount);
+    RayTracingPipelineDescBuilder& WithIndexBufferArray(std::string name, uint32_t shaderRegister, uint32_t registerSpace, uint32_t descriptorCount);
+
+    RayTracingPipelineDescBuilder& WithPayloadSize(uint32_t payloadSizeInBytes);
+    RayTracingPipelineDescBuilder& WithAttributeSize(uint32_t attributeSizeInBytes);
+    RayTracingPipelineDescBuilder& WithMaxRecursionDepth(uint32_t maxTraceRecursionDepth);
+    RayTracingPipelineDescBuilder& WithMaxDescriptorCount(uint32_t maxDescriptorCount);
+
+    RayTracingPipelineDesc Build() const;
+
+private:
+    RayTracingPipelineDescBuilder& WithBinding(
+        std::string name,
+        RayTracingShaderBindingType type,
+        uint32_t shaderRegister,
+        uint32_t registerSpace,
+        uint32_t descriptorCount);
+
+    RayTracingPipelineDesc m_Desc;
+};
+//Modify End
+
 class RayTracingShader
 {
 public:
@@ -98,6 +148,7 @@ public:
         std::string_view name,
         const std::vector<std::shared_ptr<Texture>>& textures,
         const std::vector<D3D12_SHADER_RESOURCE_VIEW_DESC>& srvDescs);
+    void SetTextureArray(std::string_view name, const std::vector<ShaderResourceView>& shaderResourceViews);
 
     void Dispatch(CommandList& commandList, std::string_view passName, uint32_t width, uint32_t height, uint32_t depth = 1);
 
