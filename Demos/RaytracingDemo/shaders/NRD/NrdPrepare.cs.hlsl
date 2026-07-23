@@ -24,6 +24,13 @@ float3 DecodeDemoNormal(float3 encoded)
     return normalize(encoded * 2.0f - 1.0f);
 }
 
+float4 PackNrdNormalRoughness(float3 normalWs, float roughness)
+{
+    normalWs = normalize(normalWs);
+    normalWs /= max(abs(normalWs.x), max(abs(normalWs.y), abs(normalWs.z)));
+    return float4(normalWs * 0.5f + 0.5f, saturate(roughness));
+}
+
 [numthreads(8, 8, 1)]
 void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -36,7 +43,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     float depth = DepthTexture.Load(int3(pixel, 0));
     if (depth >= 1.0f)
     {
-        NrdNormalRoughness[pixel] = float4(0.5f, 0.5f, 1.0f, 1.0f);
+        NrdNormalRoughness[pixel] = PackNrdNormalRoughness(float3(0.0f, 0.0f, 1.0f), 1.0f);
         NrdViewZ[pixel] = 1000000.0f;
         NrdMotion[pixel] = 0.0f;
         return;
@@ -50,7 +57,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     float roughness = 1.0f - saturate(specularSmoothness.a);
     float viewZ = max(0.001f, dot(position.xyz - CameraPosition.xyz, normalize(CameraForward.xyz)));
 
-    NrdNormalRoughness[pixel] = float4(normalWs * 0.5f + 0.5f, roughness);
+    NrdNormalRoughness[pixel] = PackNrdNormalRoughness(normalWs, roughness);
     NrdViewZ[pixel] = viewZ;
     NrdMotion[pixel] = 0.0f;
 }

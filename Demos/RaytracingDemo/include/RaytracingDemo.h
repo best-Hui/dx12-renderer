@@ -41,9 +41,6 @@ public:
 
     RaytracingDemo(const std::wstring& name, int width, int height, GraphicsSettings graphicsSettings);
 
-    static constexpr uint32_t MaxDirectionalLights = 8;
-    static constexpr uint32_t MaxPointLights = 256;
-    static constexpr uint32_t MaxAreaLights = 64;
     static constexpr uint32_t MaxInlineRayTracingTextures = 32;
     static constexpr uint32_t MaxInlineRayTracingGeometryBuffers = 256;
 
@@ -185,13 +182,16 @@ private:
         float roughness = 0.5f);
     void LoadDeferredLightingScene(CommandList& commandList);
     void CreateDemoLights();
+    void AddPointLightAtOrigin();
     void UpdateDynamicLights(float timeSeconds);
     void InitializeSceneLightBuffers(CommandList& commandList);
     void BuildSceneLightGpuData();
     void UpdatePointLightGpuData(size_t lightIndex);
     void MarkDirectionalLightsDirty();
+    void MarkDirectionalLightsDirty(size_t beginIndex, size_t endIndex);
     void MarkPointLightsDirty(size_t beginIndex, size_t endIndex);
     void MarkAreaLightsDirty();
+    void MarkAreaLightsDirty(size_t beginIndex, size_t endIndex);
     void UploadSceneLightBuffers(CommandList& commandList);
     void AddRaytracingInstances();
     void BindRayTracingShaderResources();
@@ -239,14 +239,23 @@ private:
     std::vector<DirectionalLightData> m_DirectionalLightGpuData;
     std::vector<PointLightData> m_PointLightGpuData;
     std::vector<AreaLightData> m_AreaLightGpuData;
+    size_t m_DirectionalLightBufferCapacity = 0;
+    size_t m_PointLightBufferCapacity = 0;
+    size_t m_AreaLightBufferCapacity = 0;
     std::vector<float> m_PointLightBaseY;
     std::vector<float> m_PointLightPhase;
     std::vector<float> m_PointLightOrbitRadius;
     std::vector<float> m_PointLightOrbitSpeed;
-    bool m_DirectionalLightsDirty = false;
-    bool m_AreaLightsDirty = false;
+    std::vector<uint8_t> m_PointLightAnimated;
+    size_t m_DirectionalLightDirtyBegin = 0;
+    size_t m_DirectionalLightDirtyEnd = 0;
     size_t m_PointLightDirtyBegin = 0;
     size_t m_PointLightDirtyEnd = 0;
+    size_t m_AreaLightDirtyBegin = 0;
+    size_t m_AreaLightDirtyEnd = 0;
+    DirectX::XMFLOAT3 m_NewPointLightColor = { 1.0f, 0.85f, 0.55f };
+    float m_NewPointLightIntensity = 18.0f;
+    float m_NewPointLightRange = 24.0f;
 
     float m_DeltaTime = 0.0f;
     uint32_t m_FrameIndex = 0;
@@ -254,7 +263,7 @@ private:
     int m_MaxBounces = 1;
     bool m_AccumulationEnabled = true;
     DenoiserAlgorithm m_DenoiserAlgorithm = DenoiserAlgorithm::Off;
-    bool m_AnimatePointLights = true;
+    bool m_AnimatePointLights = false;
     float m_CameraFov = 45.0f;
     float m_MouseRotateSpeed = 0.1f;
     float m_MousePanSpeed = 0.04f;

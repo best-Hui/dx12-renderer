@@ -26,6 +26,11 @@ float3 SanitizeNrdRadiance(float3 color)
     return min(max(color, 0.0f), 10000.0f);
 }
 
+float4 PackNrdDiffuseRadianceHitDistance(float3 radiance, float hitDistance)
+{
+    return float4(SanitizeNrdRadiance(radiance), max(0.0f, hitDistance));
+}
+
 bool IsVisibleAlongRay(float3 origin, float3 direction, float tMax)
 {
     RayPayload shadowPayload = TraceScene(
@@ -178,9 +183,9 @@ float3 EvaluateAreaLight(AreaLightData light, SurfaceData surface, inout uint rn
 
 float3 EvaluateDirectLighting(SurfaceData surface, inout uint rngState)
 {
-    uint directionalLightCount = min(Camera_DirectionalLightCount, MaxDirectionalLights);
-    uint pointLightCount = min(Camera_PointLightCount, MaxPointLights);
-    uint areaLightCount = min(Camera_AreaLightCount, MaxAreaLights);
+    uint directionalLightCount = Camera_DirectionalLightCount;
+    uint pointLightCount = Camera_PointLightCount;
+    uint areaLightCount = Camera_AreaLightCount;
     uint totalLightCount = directionalLightCount + pointLightCount + areaLightCount;
     if (totalLightCount == 0u)
     {
@@ -203,8 +208,9 @@ float3 EvaluateDirectLighting(SurfaceData surface, inout uint rngState)
     return EvaluateAreaLight(AreaLights[lightIndex], surface, rngState) * float(totalLightCount);
 }
 
-float3 TraceGBufferPath(SurfaceData surface, inout uint rngState)
+float3 TraceGBufferPath(SurfaceData surface, inout uint rngState, out float nrdDiffuseHitDistance)
 {
+    nrdDiffuseHitDistance = 0.0f;
     float3 diffuseColor = surface.Diffuse * (1.0f - surface.Metallic);
     float3 radiance = EvaluateDirectLighting(surface, rngState);
     float3 throughput = max(diffuseColor, surface.Specular);
@@ -220,6 +226,11 @@ float3 TraceGBufferPath(SurfaceData surface, inout uint rngState)
         {
             radiance += throughput * payload.BaseColor;
             break;
+        }
+
+        if (bounce == 0u)
+        {
+            nrdDiffuseHitDistance = max(0.0f, payload.HitT);
         }
 
         float3 positionWs = origin + direction * payload.HitT;
@@ -262,19 +273,14 @@ void WritePathTracingOutput(uint2 pixel, uint width, uint frameIndex)
         float4 view = mul(clip, Camera_InverseProjection);
         view.xyz /= max(view.w, 0.0001f);
         float3 skyDirection = normalize(mul(float4(normalize(view.xyz), 0.0f), Camera_InverseView).xyz);
-        NrdNoisyRadiance[pixel] = float4(SanitizeNrdRadiance(SampleSkybox(skyDirection)), 0.0f);
+        NrdNoisyRadiance[pixel] = PackNrdDiffuseRadianceHitDistance(SampleSkybox(skyDirection), 0.0f);
         return;
     }
 
     uint rngState = Hash(pixel.x + pixel.y * width + frameIndex * 9781u);
-    float3 sampleColor = TraceGBufferPath(surface, rngState);
-    float primaryHitDistance = length(surface.PositionWs - Camera_Position.xyz);
-    float nrdHitDistance = primaryHitDistance;
-    if (Camera_NrdDenoiserMode == 1u)
-    {
-        nrdHitDistance = saturate(primaryHitDistance / max(Camera_NrdReblurHitDistanceScale, 0.001f));
-    }
-    NrdNoisyRadiance[pixel] = float4(SanitizeNrdRadiance(sampleColor), nrdHitDistance);
+    float nrdDiffuseHitDistance = 0.0f;
+    float3 sampleColor = TraceGBufferPath(surface, rngState, nrdDiffuseHitDistance);
+    NrdNoisyRadiance[pixel] = PackNrdDiffuseRadianceHitDistance(sampleColor, nrdDiffuseHitDistance);
 
     if (Camera_AccumulationEnabled == 0u)
     {

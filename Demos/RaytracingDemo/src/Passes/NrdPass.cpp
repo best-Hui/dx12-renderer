@@ -353,8 +353,9 @@ void NrdPass::Denoise(
     commonSettings.rectSizePrev[1] = static_cast<uint16_t>(height);
     commonSettings.viewZScale = 1.0f;
     commonSettings.denoisingRange = m_Settings.DenoisingRange;
+    const bool resetHistory = m_FrameIndex == 0;
     commonSettings.frameIndex = m_FrameIndex++;
-    commonSettings.accumulationMode = m_FrameIndex == 0 ? nrd::AccumulationMode::RESTART : nrd::AccumulationMode::CONTINUE;
+    commonSettings.accumulationMode = resetHistory ? nrd::AccumulationMode::RESTART : nrd::AccumulationMode::CONTINUE;
     commonSettings.isMotionVectorInWorldSpace = true;
     m_Impl->Integration.NewFrame();
     m_Impl->Integration.SetCommonSettings(commonSettings);

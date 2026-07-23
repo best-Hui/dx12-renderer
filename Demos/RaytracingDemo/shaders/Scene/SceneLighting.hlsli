@@ -1,10 +1,6 @@
 #ifndef RAYTRACING_DEMO_SCENE_LIGHTING_HLSLI
 #define RAYTRACING_DEMO_SCENE_LIGHTING_HLSLI
 
-static const uint MaxDirectionalLights = 8;
-static const uint MaxPointLights = 256;
-static const uint MaxAreaLights = 64;
-
 struct SkyLightData
 {
     float4 ColorAndIntensity;

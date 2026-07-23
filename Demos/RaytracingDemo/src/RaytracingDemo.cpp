@@ -163,14 +163,6 @@ bool RaytracingDemo::LoadContent()
     m_InlinePathTracingShader = std::make_unique<ComputeShader>(m_RootSignature, ShaderBlob(L"InlinePathTracing.cs.cso"));
     m_NrdPass = std::make_unique<NrdPass>(m_RootSignature);
     m_SvgfPass = std::make_unique<SvgfPass>(m_RootSignature);
-    char* nrdDenoiserMode = nullptr;
-    size_t nrdDenoiserModeLength = 0;
-    _dupenv_s(&nrdDenoiserMode, &nrdDenoiserModeLength, "RAYTRACING_DEMO_NRD_MODE");
-    if (nrdDenoiserMode != nullptr && std::strcmp(nrdDenoiserMode, "reblur") == 0)
-    {
-        m_NrdPass->GetSettings().Mode = NrdPass::DenoiserMode::ReblurDiffuse;
-    }
-    std::free(nrdDenoiserMode);
     ApplyDenoiserSelection();
     if (IsDenoiserEnabled())
     {
@@ -242,9 +234,9 @@ RaytracingDemo::CameraConstants RaytracingDemo::BuildCameraConstants() const
     camera.Height = static_cast<uint32_t>(m_Height);
     camera.MaxBounces = static_cast<uint32_t>(Clamp(m_MaxBounces, 0, 5));
     camera.SamplesPerPixel = 1;
-    camera.DirectionalLightCount = static_cast<uint32_t>(std::min<size_t>(m_DirectionalLights.size(), MaxDirectionalLights));
-    camera.PointLightCount = static_cast<uint32_t>(std::min<size_t>(m_PointLights.size(), MaxPointLights));
-    camera.AreaLightCount = static_cast<uint32_t>(std::min<size_t>(m_AreaLights.size(), MaxAreaLights));
+    camera.DirectionalLightCount = static_cast<uint32_t>(m_DirectionalLightGpuData.size());
+    camera.PointLightCount = static_cast<uint32_t>(m_PointLightGpuData.size());
+    camera.AreaLightCount = static_cast<uint32_t>(m_AreaLightGpuData.size());
     camera.FrameIndex = m_FrameIndex;
     const bool pathAccumulationEnabled = m_AccumulationEnabled && !IsDenoiserEnabled();
     camera.AccumulationFrameIndex = pathAccumulationEnabled ? m_AccumulationFrameIndex : 0u;
@@ -315,7 +307,7 @@ void RaytracingDemo::OnImGui()
 
     const char* denoiserNames[] = { "Off", "NRD", "SVGF" };
     int selectedDenoiser = static_cast<int>(m_DenoiserAlgorithm);
-    if (ImGui::Combo("Denoiser", &selectedDenoiser, denoiserNames, 3))
+    if (ImGui::Combo("Denoiser##DenoiserAlgorithm", &selectedDenoiser, denoiserNames, 3))
     {
         m_DenoiserAlgorithm = static_cast<DenoiserAlgorithm>(selectedDenoiser);
         ApplyDenoiserSelection();
@@ -334,9 +326,10 @@ void RaytracingDemo::OnImGui()
         NrdPass::Settings& nrdSettings = m_NrdPass->GetSettings();
         bool nrdChanged = false;
 
-        const char* denoiserNames[] = { "RELAX Diffuse", "ReBLUR Diffuse" };
+        nrdSettings.Mode = NrdPass::DenoiserMode::RelaxDiffuse;
+        const char* denoiserNames[] = { "RELAX Diffuse" };
         int denoiserMode = static_cast<int>(nrdSettings.Mode);
-        if (ImGui::Combo("Denoiser", &denoiserMode, denoiserNames, 2))
+        if (ImGui::Combo("Denoiser##NrdMode", &denoiserMode, denoiserNames, 1))
         {
             nrdSettings.Mode = static_cast<NrdPass::DenoiserMode>(denoiserMode);
             nrdChanged = true;
@@ -429,6 +422,13 @@ void RaytracingDemo::OnImGui()
     if (!m_PointLights.empty())
     {
         ImGui::Text("PointLight[0].Y: %.2f", m_PointLights.front().PositionWs.y);
+    }
+    ImGui::ColorEdit3("New Point Light Color", &m_NewPointLightColor.x);
+    ImGui::SliderFloat("New Point Light Intensity", &m_NewPointLightIntensity, 0.0f, 100.0f, "%.1f");
+    ImGui::SliderFloat("New Point Light Range", &m_NewPointLightRange, 0.1f, 100.0f, "%.1f");
+    if (ImGui::Button("Add Point Light At Origin"))
+    {
+        AddPointLightAtOrigin();
     }
 
     const char* modeNames[] = { "Inline Ray Query", "Shader Table DXR" };
@@ -542,6 +542,7 @@ void RaytracingDemo::LoadDeferredLightingScene(CommandList& commandList)
     m_PointLightPhase.clear();
     m_PointLightOrbitRadius.clear();
     m_PointLightOrbitSpeed.clear();
+    m_PointLightAnimated.clear();
 
     const uint32_t whiteTexture = AddTexture(commandList, L"Assets/Textures/white.png");
     const uint32_t groundTexture = AddTexture(commandList, L"Assets/Textures/Ground047/Ground047_1K_Color.jpg");
@@ -654,14 +655,10 @@ void RaytracingDemo::CreateDemoLights()
     sunLight.m_Color = { 1.0f, 0.95f, 0.82f, 0.8f };
     m_DirectionalLights.push_back(sunLight);
 
-    constexpr uint32_t DemoPointLightCount = 5;
+    constexpr uint32_t DemoPointLightCount = 1;
     const XMFLOAT3 orbitCenter = { -12.0f, 6.0f, 18.0f };
     const XMFLOAT4 lightColors[DemoPointLightCount] = {
         { 1.0f, 0.35f, 0.28f, 20.0f },
-        { 0.35f, 0.75f, 1.0f, 18.0f },
-        { 0.45f, 1.0f, 0.55f, 16.0f },
-        { 1.0f, 0.85f, 0.35f, 18.0f },
-        { 0.9f, 0.45f, 1.0f, 16.0f },
     };
 
     m_PointLights.reserve(DemoPointLightCount);
@@ -669,6 +666,7 @@ void RaytracingDemo::CreateDemoLights()
     m_PointLightPhase.reserve(DemoPointLightCount);
     m_PointLightOrbitRadius.reserve(DemoPointLightCount);
     m_PointLightOrbitSpeed.reserve(DemoPointLightCount);
+    m_PointLightAnimated.reserve(DemoPointLightCount);
 
     for (uint32_t i = 0; i < DemoPointLightCount; ++i)
     {
@@ -693,6 +691,7 @@ void RaytracingDemo::CreateDemoLights()
         m_PointLightPhase.push_back(phase);
         m_PointLightOrbitRadius.push_back(radius);
         m_PointLightOrbitSpeed.push_back(speed);
+        m_PointLightAnimated.push_back(1);
     }
 
     AreaLightData areaLight{};
@@ -709,11 +708,40 @@ void RaytracingDemo::CreateDemoLights()
     MarkAreaLightsDirty();
 }
 
+void RaytracingDemo::AddPointLightAtOrigin()
+{
+    PointLight light({ 0.0f, 0.0f, 0.0f, 1.0f }, std::max(0.1f, m_NewPointLightRange));
+    light.Color = {
+        std::max(0.0f, m_NewPointLightColor.x),
+        std::max(0.0f, m_NewPointLightColor.y),
+        std::max(0.0f, m_NewPointLightColor.z),
+        std::max(0.0f, m_NewPointLightIntensity)
+    };
+    light.RecalculateAttenuationCoefficients();
+
+    const size_t lightIndex = m_PointLights.size();
+    m_PointLights.push_back(light);
+    m_PointLightBaseY.push_back(0.0f);
+    m_PointLightPhase.push_back(0.0f);
+    m_PointLightOrbitRadius.push_back(0.0f);
+    m_PointLightOrbitSpeed.push_back(0.0f);
+    m_PointLightAnimated.push_back(0);
+
+    UpdatePointLightGpuData(lightIndex);
+    MarkPointLightsDirty(lightIndex, lightIndex + 1);
+    ResetAccumulation();
+}
+
 void RaytracingDemo::UpdateDynamicLights(float timeSeconds)
 {
     const size_t pointLightCount = std::min(m_PointLights.size(), m_PointLightBaseY.size());
     for (size_t i = 0; i < pointLightCount; ++i)
     {
+        if (i < m_PointLightAnimated.size() && m_PointLightAnimated[i] == 0)
+        {
+            continue;
+        }
+
         const float radius = i < m_PointLightOrbitRadius.size() ? m_PointLightOrbitRadius[i] : 16.0f;
         const float speed = i < m_PointLightOrbitSpeed.size() ? m_PointLightOrbitSpeed[i] : 0.4f;
         const float phase = i < m_PointLightPhase.size() ? m_PointLightPhase[i] : 0.0f;
@@ -729,10 +757,60 @@ void RaytracingDemo::UpdateDynamicLights(float timeSeconds)
 
 namespace
 {
+    size_t GrowLightBufferCapacity(const size_t currentCapacity, const size_t requiredCapacity)
+    {
+        size_t newCapacity = std::max<size_t>(1, currentCapacity);
+        while (newCapacity < requiredCapacity)
+        {
+            newCapacity *= 2;
+        }
+        return newCapacity;
+    }
+
+    void MarkDirtyRange(
+        const size_t beginIndex,
+        const size_t endIndex,
+        size_t& dirtyBegin,
+        size_t& dirtyEnd)
+    {
+        if (beginIndex >= endIndex)
+        {
+            return;
+        }
+
+        if (dirtyBegin == dirtyEnd)
+        {
+            dirtyBegin = beginIndex;
+            dirtyEnd = endIndex;
+            return;
+        }
+
+        dirtyBegin = std::min(dirtyBegin, beginIndex);
+        dirtyEnd = std::max(dirtyEnd, endIndex);
+    }
+
     template<typename T>
     std::vector<T> CreateBufferCapacityData(const size_t count)
     {
         return std::vector<T>(std::max<size_t>(1, count));
+    }
+
+    template<typename T>
+    void EnsureStructuredBufferCapacity(
+        CommandList& commandList,
+        StructuredBuffer& buffer,
+        size_t& currentCapacity,
+        const std::vector<T>& values)
+    {
+        if (values.size() <= currentCapacity)
+        {
+            return;
+        }
+
+        currentCapacity = GrowLightBufferCapacity(currentCapacity, values.size());
+        std::vector<T> capacityData(currentCapacity);
+        std::copy(values.begin(), values.end(), capacityData.begin());
+        commandList.CopyStructuredBuffer(buffer, capacityData);
     }
 
     template<typename T>
@@ -762,9 +840,12 @@ namespace
 void RaytracingDemo::InitializeSceneLightBuffers(CommandList& commandList)
 {
     m_LightUploadBuffer = std::make_unique<SharedUploadBuffer>();
-    commandList.CopyStructuredBuffer(m_DirectionalLightBuffer, CreateBufferCapacityData<DirectionalLightData>(MaxDirectionalLights));
-    commandList.CopyStructuredBuffer(m_PointLightBuffer, CreateBufferCapacityData<PointLightData>(MaxPointLights));
-    commandList.CopyStructuredBuffer(m_AreaLightBuffer, CreateBufferCapacityData<AreaLightData>(MaxAreaLights));
+    m_DirectionalLightBufferCapacity = std::max<size_t>(1, m_DirectionalLightGpuData.size());
+    m_PointLightBufferCapacity = std::max<size_t>(1, m_PointLightGpuData.size());
+    m_AreaLightBufferCapacity = std::max<size_t>(1, m_AreaLightGpuData.size());
+    commandList.CopyStructuredBuffer(m_DirectionalLightBuffer, CreateBufferCapacityData<DirectionalLightData>(m_DirectionalLightBufferCapacity));
+    commandList.CopyStructuredBuffer(m_PointLightBuffer, CreateBufferCapacityData<PointLightData>(m_PointLightBufferCapacity));
+    commandList.CopyStructuredBuffer(m_AreaLightBuffer, CreateBufferCapacityData<AreaLightData>(m_AreaLightBufferCapacity));
 }
 
 void RaytracingDemo::BuildSceneLightGpuData()
@@ -773,28 +854,18 @@ void RaytracingDemo::BuildSceneLightGpuData()
     m_PointLightGpuData.clear();
     m_AreaLightGpuData.clear();
 
-    m_DirectionalLightGpuData.reserve(std::min<size_t>(m_DirectionalLights.size(), MaxDirectionalLights));
+    m_DirectionalLightGpuData.reserve(m_DirectionalLights.size());
     for (const DirectionalLight& light : m_DirectionalLights)
     {
-        if (m_DirectionalLightGpuData.size() >= MaxDirectionalLights)
-        {
-            break;
-        }
-
         DirectionalLightData gpuLight{};
         gpuLight.DirectionAndAngularRadius = light.m_DirectionWs;
         gpuLight.ColorAndIntensity = light.m_Color;
         m_DirectionalLightGpuData.push_back(gpuLight);
     }
 
-    m_PointLightGpuData.reserve(std::min<size_t>(m_PointLights.size(), MaxPointLights));
+    m_PointLightGpuData.reserve(m_PointLights.size());
     for (const PointLight& light : m_PointLights)
     {
-        if (m_PointLightGpuData.size() >= MaxPointLights)
-        {
-            break;
-        }
-
         PointLightData gpuLight{};
         gpuLight.PositionAndRange = { light.PositionWs.x, light.PositionWs.y, light.PositionWs.z, light.Range };
         gpuLight.ColorAndIntensity = light.Color;
@@ -802,20 +873,16 @@ void RaytracingDemo::BuildSceneLightGpuData()
         m_PointLightGpuData.push_back(gpuLight);
     }
 
-    m_AreaLightGpuData.reserve(std::min<size_t>(m_AreaLights.size(), MaxAreaLights));
+    m_AreaLightGpuData.reserve(m_AreaLights.size());
     for (const AreaLightData& light : m_AreaLights)
     {
-        if (m_AreaLightGpuData.size() >= MaxAreaLights)
-        {
-            break;
-        }
         m_AreaLightGpuData.push_back(light);
     }
 }
 
 void RaytracingDemo::UpdatePointLightGpuData(const size_t lightIndex)
 {
-    if (lightIndex >= m_PointLights.size() || lightIndex >= MaxPointLights)
+    if (lightIndex >= m_PointLights.size())
     {
         return;
     }
@@ -834,41 +901,43 @@ void RaytracingDemo::UpdatePointLightGpuData(const size_t lightIndex)
 
 void RaytracingDemo::MarkDirectionalLightsDirty()
 {
-    m_DirectionalLightsDirty = true;
+    MarkDirectionalLightsDirty(0, m_DirectionalLightGpuData.size());
+}
+
+void RaytracingDemo::MarkDirectionalLightsDirty(const size_t beginIndex, const size_t endIndex)
+{
+    MarkDirtyRange(beginIndex, endIndex, m_DirectionalLightDirtyBegin, m_DirectionalLightDirtyEnd);
 }
 
 void RaytracingDemo::MarkPointLightsDirty(const size_t beginIndex, const size_t endIndex)
 {
-    if (beginIndex >= endIndex)
-    {
-        return;
-    }
-
-    if (m_PointLightDirtyBegin == m_PointLightDirtyEnd)
-    {
-        m_PointLightDirtyBegin = beginIndex;
-        m_PointLightDirtyEnd = endIndex;
-        return;
-    }
-
-    m_PointLightDirtyBegin = std::min(m_PointLightDirtyBegin, beginIndex);
-    m_PointLightDirtyEnd = std::max(m_PointLightDirtyEnd, endIndex);
+    MarkDirtyRange(beginIndex, endIndex, m_PointLightDirtyBegin, m_PointLightDirtyEnd);
 }
 
 void RaytracingDemo::MarkAreaLightsDirty()
 {
-    m_AreaLightsDirty = true;
+    MarkAreaLightsDirty(0, m_AreaLightGpuData.size());
+}
+
+void RaytracingDemo::MarkAreaLightsDirty(const size_t beginIndex, const size_t endIndex)
+{
+    MarkDirtyRange(beginIndex, endIndex, m_AreaLightDirtyBegin, m_AreaLightDirtyEnd);
 }
 
 void RaytracingDemo::UploadSceneLightBuffers(CommandList& commandList)
 {
     Assert(m_LightUploadBuffer != nullptr, "Light upload buffer is not initialized.");
 
+    EnsureStructuredBufferCapacity(commandList, m_DirectionalLightBuffer, m_DirectionalLightBufferCapacity, m_DirectionalLightGpuData);
+    EnsureStructuredBufferCapacity(commandList, m_PointLightBuffer, m_PointLightBufferCapacity, m_PointLightGpuData);
+    EnsureStructuredBufferCapacity(commandList, m_AreaLightBuffer, m_AreaLightBufferCapacity, m_AreaLightGpuData);
+
     m_LightUploadBuffer->BeginFrame();
-    if (m_DirectionalLightsDirty)
+    if (m_DirectionalLightDirtyBegin < m_DirectionalLightDirtyEnd)
     {
-        UploadGpuLightRange(commandList, *m_LightUploadBuffer, m_DirectionalLightBuffer, m_DirectionalLightGpuData, 0, m_DirectionalLightGpuData.size());
-        m_DirectionalLightsDirty = false;
+        UploadGpuLightRange(commandList, *m_LightUploadBuffer, m_DirectionalLightBuffer, m_DirectionalLightGpuData, m_DirectionalLightDirtyBegin, m_DirectionalLightDirtyEnd);
+        m_DirectionalLightDirtyBegin = 0;
+        m_DirectionalLightDirtyEnd = 0;
     }
 
     if (m_PointLightDirtyBegin < m_PointLightDirtyEnd)
@@ -878,10 +947,11 @@ void RaytracingDemo::UploadSceneLightBuffers(CommandList& commandList)
         m_PointLightDirtyEnd = 0;
     }
 
-    if (m_AreaLightsDirty)
+    if (m_AreaLightDirtyBegin < m_AreaLightDirtyEnd)
     {
-        UploadGpuLightRange(commandList, *m_LightUploadBuffer, m_AreaLightBuffer, m_AreaLightGpuData, 0, m_AreaLightGpuData.size());
-        m_AreaLightsDirty = false;
+        UploadGpuLightRange(commandList, *m_LightUploadBuffer, m_AreaLightBuffer, m_AreaLightGpuData, m_AreaLightDirtyBegin, m_AreaLightDirtyEnd);
+        m_AreaLightDirtyBegin = 0;
+        m_AreaLightDirtyEnd = 0;
     }
 }
 
@@ -909,10 +979,7 @@ void RaytracingDemo::OnUpdate(UpdateEventArgs& e)
     if (m_AnimatePointLights)
     {
         UpdateDynamicLights(static_cast<float>(e.TotalTime));
-        if (!IsDenoiserEnabled())
-        {
-            ResetAccumulation();
-        }
+        ResetAccumulation();
     }
 
     const float speedMultiplier = m_CameraController.Shift ? 16.0f : 4.0f;
