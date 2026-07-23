@@ -139,6 +139,23 @@ void CommonRootSignature::SetComputeConstantBuffer(CommandList& commandList, siz
     commandList.SetComputeDynamicConstantBuffer(RootParameters::MaterialCBuffer, size, data);
 }
 
+//Modify Begin:2026-07-23 by BestHui
+void CommonRootSignature::SetComputePipelineConstantBuffer(CommandList& commandList, size_t size, const void* data) const
+{
+    commandList.SetComputeDynamicConstantBuffer(RootParameters::PipelineCBuffer, size, data);
+}
+
+void CommonRootSignature::SetComputeMaterialConstantBuffer(CommandList& commandList, size_t size, const void* data) const
+{
+    commandList.SetComputeDynamicConstantBuffer(RootParameters::MaterialCBuffer, size, data);
+}
+
+void CommonRootSignature::SetComputeModelConstantBuffer(CommandList& commandList, size_t size, const void* data) const
+{
+    commandList.SetComputeDynamicConstantBuffer(RootParameters::ModelCBuffer, size, data);
+}
+//Modify End
+
 void CommonRootSignature::SetGraphicsRootConstants(CommandList& commandList, size_t size, const void* data) const
 {
     commandList.SetGraphics32BitConstants(RootParameters::Constants, static_cast<uint32_t>(size) / sizeof(uint32_t), data);

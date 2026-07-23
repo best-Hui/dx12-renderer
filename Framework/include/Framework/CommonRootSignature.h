@@ -43,6 +43,32 @@ public:
 
     void SetComputeConstantBuffer(CommandList& commandList, size_t size, const void* data) const;
 
+//Modify Begin:2026-07-23 by BestHui
+    void SetComputePipelineConstantBuffer(CommandList& commandList, size_t size, const void* data) const;
+
+    template <typename T>
+    void SetComputePipelineConstantBuffer(CommandList& commandList, const T& data) const
+    {
+        SetComputePipelineConstantBuffer(commandList, sizeof(T), &data);
+    }
+
+    void SetComputeMaterialConstantBuffer(CommandList& commandList, size_t size, const void* data) const;
+
+    template <typename T>
+    void SetComputeMaterialConstantBuffer(CommandList& commandList, const T& data) const
+    {
+        SetComputeMaterialConstantBuffer(commandList, sizeof(T), &data);
+    }
+
+    void SetComputeModelConstantBuffer(CommandList& commandList, size_t size, const void* data) const;
+
+    template <typename T>
+    void SetComputeModelConstantBuffer(CommandList& commandList, const T& data) const
+    {
+        SetComputeModelConstantBuffer(commandList, sizeof(T), &data);
+    }
+//Modify End
+
     template <typename T>
     void SetGraphicsRootConstants(CommandList& commandList, const T& data) const
     {
