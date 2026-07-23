@@ -61,24 +61,24 @@ std::unique_ptr<RenderGraph::RenderPass> RaytracingDemoPasses::Builder::CreatePa
                 Assert(demo.m_RayTracingAccelerationStructure.GetMeshes().size() <= RaytracingDemo::MaxInlineRayTracingGeometryBuffers, "Inline ray tracing mesh count exceeds the fixed descriptor layout.");
 
                 demo.m_RootSignature->Bind(cmd);
-                demo.m_RootSignature->SetComputeConstantBuffer(cmd, sizeof(camera), &camera);
-                demo.m_RootSignature->SetComputeAccelerationStructure(cmd, demo.m_RayTracingAccelerationStructure);
-                demo.m_RootSignature->SetPipelineShaderResourceView(cmd, RaytracingDemoRenderGraph::INLINE_SRV_GBUFFER_ALBEDO_OCCLUSION, ShaderResourceView(albedoOcclusion));
-                demo.m_RootSignature->SetPipelineShaderResourceView(cmd, RaytracingDemoRenderGraph::INLINE_SRV_GBUFFER_SPECULAR_SMOOTHNESS, ShaderResourceView(specularSmoothness));
-                demo.m_RootSignature->SetPipelineShaderResourceView(cmd, RaytracingDemoRenderGraph::INLINE_SRV_GBUFFER_NORMAL, ShaderResourceView(normal));
-                demo.m_RootSignature->SetPipelineShaderResourceView(cmd, RaytracingDemoRenderGraph::INLINE_SRV_GBUFFER_EMISSION_METALLIC, ShaderResourceView(emissionMetallic));
-                demo.m_RootSignature->SetPipelineShaderResourceView(cmd, RaytracingDemoRenderGraph::INLINE_SRV_GBUFFER_POSITION, ShaderResourceView(position));
-                demo.m_RootSignature->SetPipelineShaderResourceView(cmd, RaytracingDemoRenderGraph::INLINE_SRV_DEPTH, ShaderResourceView(depth, 0, 1, RaytracingDemoRenderGraph::CreateDepthSrvDesc()));
-                demo.m_RootSignature->SetPipelineShaderResourceView(cmd, RaytracingDemoRenderGraph::INLINE_SRV_SKYBOX, ShaderResourceView(demo.m_SkyboxTexture, RaytracingDemoRenderGraph::CreateSkyboxSrvDesc(*demo.m_SkyboxTexture)));
-                cmd.SetShaderResourceView(CommonRootSignature::RootParameters::PipelineSRVs, RaytracingDemoRenderGraph::INLINE_SRV_MATERIALS, demo.m_MaterialBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-                cmd.SetShaderResourceView(CommonRootSignature::RootParameters::PipelineSRVs, RaytracingDemoRenderGraph::INLINE_SRV_GEOMETRIES, demo.m_GeometryBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-                cmd.SetShaderResourceView(CommonRootSignature::RootParameters::PipelineSRVs, RaytracingDemoRenderGraph::INLINE_SRV_DIRECTIONAL_LIGHTS, demo.m_DirectionalLightBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-                cmd.SetShaderResourceView(CommonRootSignature::RootParameters::PipelineSRVs, RaytracingDemoRenderGraph::INLINE_SRV_POINT_LIGHTS, demo.m_PointLightBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-                cmd.SetShaderResourceView(CommonRootSignature::RootParameters::PipelineSRVs, RaytracingDemoRenderGraph::INLINE_SRV_AREA_LIGHTS, demo.m_AreaLightBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                demo.m_InlinePathTracingShader->SetComputeConstantBuffer(cmd, sizeof(camera), &camera);
+                demo.m_InlinePathTracingShader->SetAccelerationStructure(cmd, demo.m_RayTracingAccelerationStructure);
+                demo.m_InlinePathTracingShader->SetPipelineShaderResourceView(cmd, RaytracingDemoRenderGraph::INLINE_SRV_GBUFFER_ALBEDO_OCCLUSION, ShaderResourceView(albedoOcclusion));
+                demo.m_InlinePathTracingShader->SetPipelineShaderResourceView(cmd, RaytracingDemoRenderGraph::INLINE_SRV_GBUFFER_SPECULAR_SMOOTHNESS, ShaderResourceView(specularSmoothness));
+                demo.m_InlinePathTracingShader->SetPipelineShaderResourceView(cmd, RaytracingDemoRenderGraph::INLINE_SRV_GBUFFER_NORMAL, ShaderResourceView(normal));
+                demo.m_InlinePathTracingShader->SetPipelineShaderResourceView(cmd, RaytracingDemoRenderGraph::INLINE_SRV_GBUFFER_EMISSION_METALLIC, ShaderResourceView(emissionMetallic));
+                demo.m_InlinePathTracingShader->SetPipelineShaderResourceView(cmd, RaytracingDemoRenderGraph::INLINE_SRV_GBUFFER_POSITION, ShaderResourceView(position));
+                demo.m_InlinePathTracingShader->SetPipelineShaderResourceView(cmd, RaytracingDemoRenderGraph::INLINE_SRV_DEPTH, ShaderResourceView(depth, 0, 1, RaytracingDemoRenderGraph::CreateDepthSrvDesc()));
+                demo.m_InlinePathTracingShader->SetPipelineShaderResourceView(cmd, RaytracingDemoRenderGraph::INLINE_SRV_SKYBOX, ShaderResourceView(demo.m_SkyboxTexture, RaytracingDemoRenderGraph::CreateSkyboxSrvDesc(*demo.m_SkyboxTexture)));
+                demo.m_InlinePathTracingShader->SetPipelineShaderResourceView(cmd, RaytracingDemoRenderGraph::INLINE_SRV_MATERIALS, demo.m_MaterialBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                demo.m_InlinePathTracingShader->SetPipelineShaderResourceView(cmd, RaytracingDemoRenderGraph::INLINE_SRV_GEOMETRIES, demo.m_GeometryBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                demo.m_InlinePathTracingShader->SetPipelineShaderResourceView(cmd, RaytracingDemoRenderGraph::INLINE_SRV_DIRECTIONAL_LIGHTS, demo.m_DirectionalLightBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                demo.m_InlinePathTracingShader->SetPipelineShaderResourceView(cmd, RaytracingDemoRenderGraph::INLINE_SRV_POINT_LIGHTS, demo.m_PointLightBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                demo.m_InlinePathTracingShader->SetPipelineShaderResourceView(cmd, RaytracingDemoRenderGraph::INLINE_SRV_AREA_LIGHTS, demo.m_AreaLightBuffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 
                 for (uint32_t textureIndex = 0; textureIndex < std::min<uint32_t>(static_cast<uint32_t>(demo.m_Textures.size()), RaytracingDemo::MaxInlineRayTracingTextures); ++textureIndex)
                 {
-                    demo.m_RootSignature->SetPipelineShaderResourceView(cmd, RaytracingDemoRenderGraph::INLINE_SRV_TEXTURES_BEGIN + textureIndex, ShaderResourceView(demo.m_Textures[textureIndex]));
+                    demo.m_InlinePathTracingShader->SetPipelineShaderResourceView(cmd, RaytracingDemoRenderGraph::INLINE_SRV_TEXTURES_BEGIN + textureIndex, ShaderResourceView(demo.m_Textures[textureIndex]));
                 }
 
                 const uint32_t inlineIndexBuffersBegin = RaytracingDemoRenderGraph::INLINE_SRV_VERTEX_BUFFERS_BEGIN + RaytracingDemo::MaxInlineRayTracingGeometryBuffers;
@@ -87,13 +87,13 @@ std::unique_ptr<RenderGraph::RenderPass> RaytracingDemoPasses::Builder::CreatePa
                 for (uint32_t meshIndex = 0; meshIndex < meshCount; ++meshIndex)
                 {
                     const Mesh& mesh = *meshes[meshIndex];
-                    cmd.SetShaderResourceView(CommonRootSignature::RootParameters::PipelineSRVs, RaytracingDemoRenderGraph::INLINE_SRV_VERTEX_BUFFERS_BEGIN + meshIndex, mesh.GetVertexBuffer(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-                    cmd.SetShaderResourceView(CommonRootSignature::RootParameters::PipelineSRVs, inlineIndexBuffersBegin + meshIndex, mesh.GetIndexBuffer(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                    demo.m_InlinePathTracingShader->SetPipelineShaderResourceView(cmd, RaytracingDemoRenderGraph::INLINE_SRV_VERTEX_BUFFERS_BEGIN + meshIndex, mesh.GetVertexBuffer(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                    demo.m_InlinePathTracingShader->SetPipelineShaderResourceView(cmd, inlineIndexBuffersBegin + meshIndex, mesh.GetIndexBuffer(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
                 }
 
-                demo.m_RootSignature->SetUnorderedAccessView(cmd, 0, UnorderedAccessView(output));
-                demo.m_RootSignature->SetUnorderedAccessView(cmd, 1, UnorderedAccessView(accumulation));
-                demo.m_RootSignature->SetUnorderedAccessView(cmd, 2, UnorderedAccessView(nrdNoisyRadiance));
+                demo.m_InlinePathTracingShader->SetUnorderedAccessView(cmd, 0, UnorderedAccessView(output));
+                demo.m_InlinePathTracingShader->SetUnorderedAccessView(cmd, 1, UnorderedAccessView(accumulation));
+                demo.m_InlinePathTracingShader->SetUnorderedAccessView(cmd, 2, UnorderedAccessView(nrdNoisyRadiance));
                 demo.m_InlinePathTracingShader->Bind(cmd);
                 cmd.Dispatch((camera.Width + 7u) / 8u, (camera.Height + 7u) / 8u, 1u);
             }

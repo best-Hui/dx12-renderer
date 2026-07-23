@@ -67,6 +67,31 @@ void ComputeShader::SetShaderResourceView(CommandList& commandList, const std::s
     }
 }
 
+void ComputeShader::SetPipelineShaderResourceView(CommandList& commandList, UINT index, const ShaderResourceView& shaderResourceView) const
+{
+    m_RootSignature->SetPipelineShaderResourceView(commandList, index, shaderResourceView);
+}
+
+void ComputeShader::SetPipelineShaderResourceView(CommandList& commandList, UINT index, const Resource& resource, D3D12_RESOURCE_STATES stateAfter) const
+{
+    commandList.SetShaderResourceView(CommonRootSignature::RootParameters::PipelineSRVs, index, resource, stateAfter);
+}
+
+void ComputeShader::SetComputeShaderResourceView(CommandList& commandList, UINT index, const ShaderResourceView& shaderResourceView) const
+{
+    m_RootSignature->SetComputeShaderResourceView(commandList, index, shaderResourceView);
+}
+
+void ComputeShader::SetUnorderedAccessView(CommandList& commandList, UINT index, const UnorderedAccessView& unorderedAccessView) const
+{
+    m_RootSignature->SetUnorderedAccessView(commandList, index, unorderedAccessView);
+}
+
+void ComputeShader::SetAccelerationStructure(CommandList& commandList, const RayTracingAccelerationStructure& accelerationStructure) const
+{
+    m_RootSignature->SetComputeAccelerationStructure(commandList, accelerationStructure);
+}
+
 Microsoft::WRL::ComPtr<ID3D12PipelineState> ComputeShader::GetPipelineState(const Microsoft::WRL::ComPtr<ID3D12Device2>& device) const
 {
     if (m_PipelineState)

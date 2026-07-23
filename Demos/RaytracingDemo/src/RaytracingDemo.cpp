@@ -160,7 +160,7 @@ bool RaytracingDemo::LoadContent()
     rayTracingDesc.Bindings.push_back({ "NrdNoisyRadiance", RayTracingShaderBindingType::OutputTexture, 2, 0, 1 });
     rayTracingDesc.PayloadSizeInBytes = 64;
     m_RayTracingShader = std::make_unique<RayTracingShader>(ShaderBlob(L"PathTracing.rt.cso"), rayTracingDesc);
-    m_InlinePathTracingShader = std::make_unique<ComputeShader>(m_RootSignature, ShaderBlob(L"InlinePathTracing.cs.cso"));
+    m_InlinePathTracingShader = std::make_unique<ComputeShader>(m_RootSignature, ShaderBlob(L"InlinePathTracing.cs.cso"), false);
     m_NrdPass = std::make_unique<NrdPass>(m_RootSignature);
     m_SvgfPass = std::make_unique<SvgfPass>(m_RootSignature);
     ApplyDenoiserSelection();

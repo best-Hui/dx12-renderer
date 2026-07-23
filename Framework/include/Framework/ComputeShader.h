@@ -15,6 +15,7 @@
 #include "ShaderBlob.h"
 //Modify Begin:2026-07-23 by BestHui
 #include "ShaderResourceView.h"
+#include "UnorderedAccessView.h"
 
 #include <map>
 #include <string>
@@ -58,6 +59,12 @@ public:
     void SetComputeConstantBuffer(CommandList& commandList, size_t size, const void* data) const;
 
     void SetShaderResourceView(CommandList& commandList, const std::string& variableName, const ShaderResourceView& shaderResourceView) const;
+
+    void SetPipelineShaderResourceView(CommandList& commandList, UINT index, const ShaderResourceView& shaderResourceView) const;
+    void SetPipelineShaderResourceView(CommandList& commandList, UINT index, const Resource& resource, D3D12_RESOURCE_STATES stateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE) const;
+    void SetComputeShaderResourceView(CommandList& commandList, UINT index, const ShaderResourceView& shaderResourceView) const;
+    void SetUnorderedAccessView(CommandList& commandList, UINT index, const UnorderedAccessView& unorderedAccessView) const;
+    void SetAccelerationStructure(CommandList& commandList, const RayTracingAccelerationStructure& accelerationStructure) const;
 
     struct ShaderMetadata
     {
