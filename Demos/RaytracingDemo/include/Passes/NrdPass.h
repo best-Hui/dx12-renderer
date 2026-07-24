@@ -72,15 +72,26 @@ public:
     const Settings& GetSettings() const { return m_Settings; }
     void ResetHistory();
 
+    void PrepareDenoiserInputs(
+        RaytracingDemo& demo,
+        CommandList& commandList,
+        const std::shared_ptr<Texture>& gBufferSpecularSmoothness,
+        const std::shared_ptr<Texture>& gBufferNormal,
+        const std::shared_ptr<Texture>& gBufferPosition,
+        const std::shared_ptr<Texture>& depthTexture,
+        const std::shared_ptr<Texture>& motionVector,
+        const std::shared_ptr<Texture>& nrdNormalRoughness,
+        const std::shared_ptr<Texture>& nrdViewZ,
+        const std::shared_ptr<Texture>& nrdMotion,
+        uint32_t width,
+        uint32_t height);
+
     void Execute(
         RaytracingDemo& demo,
         CommandList& commandList,
         const std::shared_ptr<Texture>& noisyRadiance,
         const std::shared_ptr<Texture>& gBufferAlbedoOcclusion,
-        const std::shared_ptr<Texture>& gBufferSpecularSmoothness,
-        const std::shared_ptr<Texture>& gBufferNormal,
         const std::shared_ptr<Texture>& gBufferEmissionMetallic,
-        const std::shared_ptr<Texture>& gBufferPosition,
         const std::shared_ptr<Texture>& depthTexture,
         const std::shared_ptr<Texture>& nrdNormalRoughness,
         const std::shared_ptr<Texture>& nrdViewZ,
@@ -94,8 +105,6 @@ private:
     struct PrepareConstants
     {
         DirectX::XMMATRIX WorldToView = DirectX::XMMatrixIdentity();
-        DirectX::XMMATRIX WorldToClip = DirectX::XMMatrixIdentity();
-        DirectX::XMMATRIX PreviousWorldToClip = DirectX::XMMatrixIdentity();
         uint32_t Width = 1;
         uint32_t Height = 1;
         uint32_t Padding0 = 0;
@@ -118,6 +127,7 @@ private:
         const std::shared_ptr<Texture>& gBufferNormal,
         const std::shared_ptr<Texture>& gBufferPosition,
         const std::shared_ptr<Texture>& depthTexture,
+        const std::shared_ptr<Texture>& motionVector,
         const std::shared_ptr<Texture>& nrdNormalRoughness,
         const std::shared_ptr<Texture>& nrdViewZ,
         const std::shared_ptr<Texture>& nrdMotion,

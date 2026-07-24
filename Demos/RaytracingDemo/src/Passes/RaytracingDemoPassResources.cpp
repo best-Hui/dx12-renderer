@@ -14,6 +14,9 @@ namespace RaytracingDemoRenderGraph
             { ResourceIds::GBufferNormal, renderWidthExpression, renderHeightExpression, GBUFFER_NORMAL_FORMAT, GBUFFER_CLEAR_COLOR, RenderGraph::ResourceInitAction::Clear },
             { ResourceIds::GBufferEmissionMetallic, renderWidthExpression, renderHeightExpression, GBUFFER_COLOR_FORMAT, GBUFFER_CLEAR_COLOR, RenderGraph::ResourceInitAction::Clear },
             { ResourceIds::GBufferPosition, renderWidthExpression, renderHeightExpression, GBUFFER_POSITION_FORMAT, GBUFFER_CLEAR_COLOR, RenderGraph::ResourceInitAction::Clear },
+            { ResourceIds::MotionVector, renderWidthExpression, renderHeightExpression, MOTION_VECTOR_FORMAT, GBUFFER_CLEAR_COLOR, RenderGraph::ResourceInitAction::Clear },
+            { ResourceIds::DirectLighting, renderWidthExpression, renderHeightExpression, LIGHTING_FORMAT, GBUFFER_CLEAR_COLOR, RenderGraph::ResourceInitAction::Discard },
+            { ResourceIds::IndirectLighting, renderWidthExpression, renderHeightExpression, LIGHTING_FORMAT, GBUFFER_CLEAR_COLOR, RenderGraph::ResourceInitAction::Discard },
             { ResourceIds::Accumulation, renderWidthExpression, renderHeightExpression, ACCUMULATION_FORMAT, GBUFFER_CLEAR_COLOR, RenderGraph::ResourceInitAction::Discard },
             { ResourceIds::NrdNoisyRadiance, renderWidthExpression, renderHeightExpression, NRD_RADIANCE_FORMAT, GBUFFER_CLEAR_COLOR, RenderGraph::ResourceInitAction::Discard },
             { ResourceIds::NrdDenoisedRadiance, renderWidthExpression, renderHeightExpression, NRD_RADIANCE_FORMAT, GBUFFER_CLEAR_COLOR, RenderGraph::ResourceInitAction::Discard },
@@ -33,9 +36,12 @@ namespace RaytracingDemoRenderGraph
     {
         return {
             { ResourceIds::SetupFinishedToken },
-            { ResourceIds::GBufferFinishedToken },
+            { ResourceIds::BaseResourcesFinishedToken },
             { ResourceIds::SkyboxFinishedToken },
+            { ResourceIds::DirectLightingFinishedToken },
+            { ResourceIds::IndirectLightingFinishedToken },
             { ResourceIds::RayTracingFinishedToken },
+            { ResourceIds::DenoiserPrepareFinishedToken },
             { ResourceIds::NrdFinishedToken },
             { ResourceIds::DenoiseFinishedToken },
             { ResourceIds::LightBillboardFinishedToken },

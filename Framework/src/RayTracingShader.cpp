@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <cstring>
 #include <map>
+#include <optional>
 #include <unordered_map>
 
 #if defined(min)
@@ -97,6 +98,16 @@ namespace
         desc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
         return desc;
     }
+
+    //Modify Begin:2026-07-24 by BestHui
+    D3D12_UNORDERED_ACCESS_VIEW_DESC CreateDefaultNullTextureUavDesc()
+    {
+        D3D12_UNORDERED_ACCESS_VIEW_DESC desc = {};
+        desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+        desc.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+        return desc;
+    }
+    //Modify End
 
     bool IsBufferSrvDimension(const D3D_SRV_DIMENSION dimension)
     {
@@ -227,12 +238,30 @@ struct RayTracingShader::Impl
         }
     }
 
+    RayTracingPipelineDesc Desc;
+    std::shared_ptr<RayTracingPipelineState> PipelineState;
+    std::unordered_map<std::string, uint32_t> BindingIndicesByName;
+};
+
+//Modify Begin:2026-07-24 by BestHui
+struct RayTracingBindingSet::Impl
+{
+    explicit Impl(const RayTracingShader& shader)
+        : Shader(shader)
+    {}
+
+    const RayTracingShader::Impl& GetShaderImpl() const
+    {
+        return *Shader.m_Impl;
+    }
+
     const RayTracingShaderBindingDesc& GetBinding(std::string_view name, RayTracingShaderBindingType expectedType) const
     {
-        const auto findResult = BindingIndicesByName.find(std::string(name));
-        Assert(findResult != BindingIndicesByName.end(), "Ray tracing shader binding was not found.");
+        const RayTracingShader::Impl& shaderImpl = GetShaderImpl();
+        const auto findResult = shaderImpl.BindingIndicesByName.find(std::string(name));
+        Assert(findResult != shaderImpl.BindingIndicesByName.end(), "Ray tracing shader binding was not found.");
 
-        const RayTracingShaderBindingDesc& binding = Desc.Bindings[findResult->second];
+        const RayTracingShaderBindingDesc& binding = shaderImpl.Desc.Bindings[findResult->second];
         if (binding.Type != expectedType)
         {
             const std::string message =
@@ -247,9 +276,37 @@ struct RayTracingShader::Impl
         return binding;
     }
 
+    bool HasBinding(std::string_view name) const
+    {
+        const RayTracingShader::Impl& shaderImpl = GetShaderImpl();
+        return shaderImpl.BindingIndicesByName.find(std::string(name)) != shaderImpl.BindingIndicesByName.end();
+    }
+
+    const RayTracingShaderBindingDesc& GetShaderResourceBinding(std::string_view name) const
+    {
+        const RayTracingShader::Impl& shaderImpl = GetShaderImpl();
+        const auto findResult = shaderImpl.BindingIndicesByName.find(std::string(name));
+        Assert(findResult != shaderImpl.BindingIndicesByName.end(), "Ray tracing shader binding was not found.");
+
+        const RayTracingShaderBindingDesc& binding = shaderImpl.Desc.Bindings[findResult->second];
+        if (binding.Type != RayTracingShaderBindingType::TextureArray &&
+            binding.Type != RayTracingShaderBindingType::VertexBufferArray &&
+            binding.Type != RayTracingShaderBindingType::IndexBufferArray)
+        {
+            const std::string message =
+                "Ray tracing shader binding type does not match the SRV setter. Name=" +
+                std::string(name) +
+                " Actual=" +
+                GetRayTracingBindingTypeName(binding.Type);
+            throw std::exception(message.c_str());
+        }
+        return binding;
+    }
+
     uint32_t GetBindingIndex(const RayTracingShaderBindingDesc& binding) const
     {
-        return static_cast<uint32_t>(&binding - Desc.Bindings.data());
+        const RayTracingPipelineDesc& desc = GetShaderImpl().Desc;
+        return static_cast<uint32_t>(&binding - desc.Bindings.data());
     }
 
     void MarkDescriptorsDirty(const RayTracingShaderBindingDesc& binding)
@@ -262,7 +319,8 @@ struct RayTracingShader::Impl
 
     const RayTracingShaderPassDesc& ResolvePass(std::string_view passName)
     {
-        if (Desc.Passes.empty())
+        const RayTracingPipelineDesc& desc = GetShaderImpl().Desc;
+        if (desc.Passes.empty())
         {
             DefaultPass.Name = std::string(passName);
             DefaultPass.RayGenerationShader = std::wstring(passName.begin(), passName.end());
@@ -272,24 +330,24 @@ struct RayTracingShader::Impl
         }
 
         const auto passFindResult = std::find_if(
-            Desc.Passes.begin(),
-            Desc.Passes.end(),
+            desc.Passes.begin(),
+            desc.Passes.end(),
             [passName](const RayTracingShaderPassDesc& pass)
             {
                 return pass.Name == passName;
             });
 
-        Assert(passFindResult != Desc.Passes.end(), "Ray tracing shader pass was not found.");
+        Assert(passFindResult != desc.Passes.end(), "Ray tracing shader pass was not found.");
         return *passFindResult;
     }
 
-    std::vector<ShaderRecord> BuildShaderRecords(const std::vector<RayTracingShaderRecordDesc>& recordDescs)
+    std::vector<ShaderRecord> BuildShaderRecords(const std::vector<RayTracingShaderRecordDesc>& recordDescs) const
     {
         std::vector<ShaderRecord> records;
         records.reserve(recordDescs.size());
         for (const RayTracingShaderRecordDesc& recordDesc : recordDescs)
         {
-            const void* shaderIdentifier = PipelineState->GetShaderIdentifier(recordDesc.ExportName);
+            const void* shaderIdentifier = GetShaderImpl().PipelineState->GetShaderIdentifier(recordDesc.ExportName);
             Assert(shaderIdentifier != nullptr, "Ray tracing shader identifier was not found.");
             records.push_back({ shaderIdentifier, recordDesc.LocalRootArguments });
         }
@@ -304,7 +362,6 @@ struct RayTracingShader::Impl
         }
 
         const auto device = Application::Get().GetDevice();
-
         RayGenerationShaderTable.Reset(
             device,
             BuildShaderRecords({ { pass.RayGenerationShader, {} } }),
@@ -327,13 +384,14 @@ struct RayTracingShader::Impl
     void RebuildDescriptorAllocation()
     {
         const auto device = Application::Get().GetDevice();
+        const RayTracingPipelineDesc& desc = GetShaderImpl().Desc;
 
         uint32_t descriptorCount = 0;
         DescriptorTableOffsets.clear();
-        DescriptorTableOffsets.resize(Desc.Bindings.size(), UINT32_MAX);
-        for (uint32_t i = 0; i < Desc.Bindings.size(); ++i)
+        DescriptorTableOffsets.resize(desc.Bindings.size(), UINT32_MAX);
+        for (uint32_t i = 0; i < desc.Bindings.size(); ++i)
         {
-            const RayTracingShaderBindingDesc& binding = Desc.Bindings[i];
+            const RayTracingShaderBindingDesc& binding = desc.Bindings[i];
             if (IsDescriptorTableBinding(binding.Type))
             {
                 DescriptorTableOffsets[i] = descriptorCount;
@@ -357,9 +415,9 @@ struct RayTracingShader::Impl
         const D3D12_SHADER_RESOURCE_VIEW_DESC nullTextureSrvDesc =
             DescriptorLayout::CreateNullShaderResourceViewDesc(nullTextureMetadata);
 
-        for (uint32_t bindingIndex = 0; bindingIndex < Desc.Bindings.size(); ++bindingIndex)
+        for (uint32_t bindingIndex = 0; bindingIndex < desc.Bindings.size(); ++bindingIndex)
         {
-            const RayTracingShaderBindingDesc& binding = Desc.Bindings[bindingIndex];
+            const RayTracingShaderBindingDesc& binding = desc.Bindings[bindingIndex];
             if (!IsDescriptorTableBinding(binding.Type))
             {
                 continue;
@@ -370,23 +428,39 @@ struct RayTracingShader::Impl
 
             if (binding.Type == RayTracingShaderBindingType::OutputTexture)
             {
-                Assert(boundBinding.TextureResource != nullptr, "Ray tracing output texture is not bound.");
-                device->CopyDescriptorsSimple(
-                    1,
-                    DescriptorAllocation.GetDescriptorHandle(descriptorOffset),
-                    boundBinding.TextureResource->GetUnorderedAccessView(),
-                    D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+                const D3D12_UNORDERED_ACCESS_VIEW_DESC nullUavDesc = binding.HasNullUnorderedAccessViewDesc ?
+                    binding.NullUnorderedAccessViewDesc :
+                    CreateDefaultNullTextureUavDesc();
+                for (uint32_t i = 0; i < binding.DescriptorCount; ++i)
+                {
+                    if (i == 0u && boundBinding.UnorderedAccessView.has_value() &&
+                        boundBinding.UnorderedAccessView->m_Resource != nullptr)
+                    {
+                        device->CopyDescriptorsSimple(
+                            1,
+                            DescriptorAllocation.GetDescriptorHandle(descriptorOffset),
+                            boundBinding.UnorderedAccessView->m_Resource->GetUnorderedAccessView(
+                                boundBinding.UnorderedAccessView->GetDescOrNullptr()),
+                            D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+                    }
+                    else
+                    {
+                        device->CreateUnorderedAccessView(nullptr, nullptr, &nullUavDesc, DescriptorAllocation.GetDescriptorHandle(descriptorOffset + i));
+                    }
+                }
                 continue;
             }
 
             if (binding.Type == RayTracingShaderBindingType::TextureArray)
             {
-                Assert(boundBinding.TextureShaderResourceViews.size() <= binding.DescriptorCount, "Ray tracing texture array exceeds binding descriptor count.");
+                Assert(boundBinding.ShaderResourceViews.size() <= binding.DescriptorCount, "Ray tracing texture array exceeds binding descriptor count.");
                 for (uint32_t i = 0; i < binding.DescriptorCount; ++i)
                 {
-                    if (i < boundBinding.TextureShaderResourceViews.size())
+                    if (i < boundBinding.ShaderResourceViews.size() &&
+                        boundBinding.ShaderResourceViews[i].has_value() &&
+                        boundBinding.ShaderResourceViews[i]->m_Resource != nullptr)
                     {
-                        const ShaderResourceView& shaderResourceView = boundBinding.TextureShaderResourceViews[i];
+                        const ShaderResourceView& shaderResourceView = *boundBinding.ShaderResourceViews[i];
                         device->CopyDescriptorsSimple(
                             1,
                             DescriptorAllocation.GetDescriptorHandle(descriptorOffset + i),
@@ -441,28 +515,25 @@ struct RayTracingShader::Impl
 
     struct BoundBinding
     {
-        std::shared_ptr<Texture> TextureResource;
-        std::vector<ShaderResourceView> TextureShaderResourceViews;
+        std::optional<UnorderedAccessView> UnorderedAccessView;
+        std::vector<std::optional<ShaderResourceView>> ShaderResourceViews;
         const StructuredBuffer* Buffer = nullptr;
         std::vector<uint8_t> ConstantBufferData;
     };
 
-    RayTracingPipelineDesc Desc;
-    std::shared_ptr<RayTracingPipelineState> PipelineState;
+    const RayTracingShader& Shader;
     ShaderTable RayGenerationShaderTable;
     ShaderTable MissShaderTable;
     ShaderTable HitGroupShaderTable;
     RayTracingShaderPassDesc DefaultPass;
     std::string CurrentPassName;
-
-    std::unordered_map<std::string, uint32_t> BindingIndicesByName;
     std::map<uint32_t, BoundBinding> BoundBindings;
     const RayTracingAccelerationStructure* AccelerationStructure = nullptr;
-
     DescriptorAllocation DescriptorAllocation;
     std::vector<uint32_t> DescriptorTableOffsets;
     bool DescriptorsDirty = true;
 };
+//Modify End
 
 RayTracingPipelineDesc RayTracingShader::CreateDefaultPipelineDesc()
 {
@@ -571,7 +642,11 @@ RayTracingPipelineDescBuilder RayTracingPipelineDescBuilder::ReflectedDefault(co
             RayTracingShaderBindingType::OutputTexture,
             uav.RegisterIndex,
             uav.Space,
-            DescriptorLayout::NormalizeDescriptorCount(uav.BindCount, desc.MaxDescriptorCount)
+            //Modify Begin:2026-07-24 by BestHui
+            DescriptorLayout::NormalizeDescriptorCount(uav.BindCount, desc.MaxDescriptorCount),
+            DescriptorLayout::CreateNullUnorderedAccessViewDesc(uav),
+            true
+            //Modify End
         });
     }
 
@@ -732,13 +807,20 @@ RayTracingPipelineDescBuilder& RayTracingPipelineDescBuilder::WithBinding(
 
     if (existingBinding != m_Desc.Bindings.end())
     {
+        //Modify Begin:2026-07-24 by BestHui
+        const D3D12_UNORDERED_ACCESS_VIEW_DESC previousNullUavDesc = existingBinding->NullUnorderedAccessViewDesc;
+        const bool previousHasNullUavDesc = existingBinding->HasNullUnorderedAccessViewDesc;
+        const bool isOutputTexture = type == RayTracingShaderBindingType::OutputTexture;
         *existingBinding = {
             std::move(name),
             type,
             shaderRegister,
             registerSpace,
-            descriptorCount
+            descriptorCount,
+            isOutputTexture && previousHasNullUavDesc ? previousNullUavDesc : isOutputTexture ? CreateDefaultNullTextureUavDesc() : D3D12_UNORDERED_ACCESS_VIEW_DESC{},
+            isOutputTexture
         };
+        //Modify End
         return *this;
     }
 
@@ -747,56 +829,94 @@ RayTracingPipelineDescBuilder& RayTracingPipelineDescBuilder::WithBinding(
         type,
         shaderRegister,
         registerSpace,
-        descriptorCount
+        //Modify Begin:2026-07-24 by BestHui
+        descriptorCount,
+        type == RayTracingShaderBindingType::OutputTexture ? CreateDefaultNullTextureUavDesc() : D3D12_UNORDERED_ACCESS_VIEW_DESC{},
+        type == RayTracingShaderBindingType::OutputTexture
+        //Modify End
     });
     return *this;
 }
 //Modify End
 
-RayTracingShader::RayTracingShader(const ShaderBlob& shaderLibrary)
-    : RayTracingShader(shaderLibrary, CreateDefaultPipelineDesc())
+//Modify Begin:2026-07-24 by BestHui
+RayTracingBindingSet::RayTracingBindingSet(const RayTracingShader& shader)
+    : m_Impl(std::make_unique<Impl>(shader))
 {}
 
-RayTracingShader::RayTracingShader(const ShaderBlob& shaderLibrary, RayTracingPipelineDesc desc)
-    : m_Impl(std::make_unique<Impl>(shaderLibrary, std::move(desc)))
-{}
+RayTracingBindingSet::~RayTracingBindingSet() = default;
+RayTracingBindingSet::RayTracingBindingSet(RayTracingBindingSet&&) noexcept = default;
+RayTracingBindingSet& RayTracingBindingSet::operator=(RayTracingBindingSet&&) noexcept = default;
 
-RayTracingShader::~RayTracingShader() = default;
-RayTracingShader::RayTracingShader(RayTracingShader&&) noexcept = default;
-RayTracingShader& RayTracingShader::operator=(RayTracingShader&&) noexcept = default;
-
-bool RayTracingShader::IsSupported()
+bool RayTracingBindingSet::HasBinding(std::string_view name) const
 {
-    D3D12_FEATURE_DATA_D3D12_OPTIONS5 options5 = {};
-    if (FAILED(Application::Get().GetDevice()->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &options5, sizeof(options5))))
+    return m_Impl->HasBinding(name);
+}
+
+void RayTracingBindingSet::SetTexture(std::string_view name, const ShaderResourceView& shaderResourceView)
+{
+    SetShaderResourceView(name, 0u, shaderResourceView);
+}
+
+void RayTracingBindingSet::SetTexture(std::string_view name, const uint32_t arrayIndex, const ShaderResourceView& shaderResourceView)
+{
+    SetShaderResourceView(name, arrayIndex, shaderResourceView);
+}
+
+void RayTracingBindingSet::SetTexture(std::string_view name, const std::shared_ptr<Resource>& texture)
+{
+    SetShaderResourceView(name, 0u, ShaderResourceView(texture));
+}
+
+void RayTracingBindingSet::SetShaderResourceView(std::string_view name, const ShaderResourceView& shaderResourceView)
+{
+    SetShaderResourceView(name, 0u, shaderResourceView);
+}
+
+void RayTracingBindingSet::SetShaderResourceView(
+    std::string_view name,
+    const uint32_t arrayIndex,
+    const ShaderResourceView& shaderResourceView)
+{
+    const RayTracingShaderBindingDesc& binding = m_Impl->GetShaderResourceBinding(name);
+    Assert(DescriptorLayout::IsArrayIndexInBounds(binding.DescriptorCount, arrayIndex), "Ray tracing SRV array index is out of bounds.");
+    Assert(shaderResourceView.m_Resource != nullptr, "Ray tracing SRV resource must not be null.");
+
+    auto& shaderResourceViews = m_Impl->BoundBindings[m_Impl->GetBindingIndex(binding)].ShaderResourceViews;
+    if (shaderResourceViews.size() <= arrayIndex)
     {
-        return false;
+        shaderResourceViews.resize(static_cast<size_t>(arrayIndex) + 1u);
     }
-
-    return options5.RaytracingTier != D3D12_RAYTRACING_TIER_NOT_SUPPORTED;
-}
-
-const RayTracingPipelineDesc& RayTracingShader::GetDesc() const
-{
-    return m_Impl->Desc;
-}
-
-void RayTracingShader::SetOutputTexture(std::string_view name, const std::shared_ptr<Texture>& texture)
-{
-    const RayTracingShaderBindingDesc& binding = m_Impl->GetBinding(name, RayTracingShaderBindingType::OutputTexture);
-    Assert(texture != nullptr, "Ray tracing output texture must not be null.");
-    m_Impl->BoundBindings[m_Impl->GetBindingIndex(binding)].TextureResource = texture;
+    shaderResourceViews[arrayIndex] = shaderResourceView;
     m_Impl->MarkDescriptorsDirty(binding);
 }
 
-void RayTracingShader::SetAccelerationStructure(std::string_view name, const RayTracingAccelerationStructure& accelerationStructure)
+void RayTracingBindingSet::SetUnorderedAccessView(std::string_view name, const UnorderedAccessView& unorderedAccessView)
+{
+    const RayTracingShaderBindingDesc& binding = m_Impl->GetBinding(name, RayTracingShaderBindingType::OutputTexture);
+    Assert(unorderedAccessView.m_Resource != nullptr, "Ray tracing UAV resource must not be null.");
+    m_Impl->BoundBindings[m_Impl->GetBindingIndex(binding)].UnorderedAccessView = unorderedAccessView;
+    m_Impl->MarkDescriptorsDirty(binding);
+}
+
+void RayTracingBindingSet::SetBuffer(std::string_view name, const StructuredBuffer& buffer)
+{
+    SetStructuredBuffer(name, buffer);
+}
+
+void RayTracingBindingSet::SetOutputTexture(std::string_view name, const std::shared_ptr<Texture>& texture)
+{
+    SetUnorderedAccessView(name, UnorderedAccessView(texture));
+}
+
+void RayTracingBindingSet::SetAccelerationStructure(std::string_view name, const RayTracingAccelerationStructure& accelerationStructure)
 {
     m_Impl->GetBinding(name, RayTracingShaderBindingType::AccelerationStructure);
     m_Impl->AccelerationStructure = &accelerationStructure;
     m_Impl->DescriptorsDirty = true;
 }
 
-void RayTracingShader::SetConstantBufferData(std::string_view name, const void* data, const size_t size)
+void RayTracingBindingSet::SetConstantBufferData(std::string_view name, const void* data, const size_t size)
 {
     const RayTracingShaderBindingDesc& binding = m_Impl->GetBinding(name, RayTracingShaderBindingType::ConstantBuffer);
     Assert(data != nullptr && size > 0, "Ray tracing constant buffer data must not be empty.");
@@ -806,13 +926,13 @@ void RayTracingShader::SetConstantBufferData(std::string_view name, const void* 
     std::memcpy(constantBufferData.data(), data, size);
 }
 
-void RayTracingShader::SetStructuredBuffer(std::string_view name, const StructuredBuffer& buffer)
+void RayTracingBindingSet::SetStructuredBuffer(std::string_view name, const StructuredBuffer& buffer)
 {
     const RayTracingShaderBindingDesc& binding = m_Impl->GetBinding(name, RayTracingShaderBindingType::StructuredBuffer);
     m_Impl->BoundBindings[m_Impl->GetBindingIndex(binding)].Buffer = &buffer;
 }
 
-void RayTracingShader::SetTextureArray(std::string_view name, const std::vector<std::shared_ptr<Texture>>& textures)
+void RayTracingBindingSet::SetTextureArray(std::string_view name, const std::vector<std::shared_ptr<Texture>>& textures)
 {
     std::vector<ShaderResourceView> shaderResourceViews;
     shaderResourceViews.reserve(textures.size());
@@ -823,7 +943,7 @@ void RayTracingShader::SetTextureArray(std::string_view name, const std::vector<
     SetTextureArray(name, shaderResourceViews);
 }
 
-void RayTracingShader::SetTextureArray(
+void RayTracingBindingSet::SetTextureArray(
     std::string_view name,
     const std::vector<std::shared_ptr<Texture>>& textures,
     const std::vector<D3D12_SHADER_RESOURCE_VIEW_DESC>& srvDescs)
@@ -838,22 +958,23 @@ void RayTracingShader::SetTextureArray(
     SetTextureArray(name, shaderResourceViews);
 }
 
-void RayTracingShader::SetTextureArray(std::string_view name, const std::vector<ShaderResourceView>& shaderResourceViews)
+void RayTracingBindingSet::SetTextureArray(std::string_view name, const std::vector<ShaderResourceView>& shaderResourceViews)
 {
-    const RayTracingShaderBindingDesc& binding = m_Impl->GetBinding(name, RayTracingShaderBindingType::TextureArray);
-    Assert(!shaderResourceViews.empty(), "Ray tracing texture array must not be empty.");
+    const RayTracingShaderBindingDesc& binding = m_Impl->GetShaderResourceBinding(name);
     Assert(shaderResourceViews.size() <= binding.DescriptorCount, "Ray tracing texture array exceeds binding descriptor count.");
+    auto& boundBinding = m_Impl->BoundBindings[m_Impl->GetBindingIndex(binding)];
+    boundBinding.ShaderResourceViews.clear();
+    boundBinding.ShaderResourceViews.reserve(shaderResourceViews.size());
     for (const ShaderResourceView& shaderResourceView : shaderResourceViews)
     {
         Assert(shaderResourceView.m_Resource != nullptr, "Ray tracing texture SRV resource must not be null.");
+        boundBinding.ShaderResourceViews.push_back(shaderResourceView);
     }
 
-    auto& boundBinding = m_Impl->BoundBindings[m_Impl->GetBindingIndex(binding)];
-    boundBinding.TextureShaderResourceViews = shaderResourceViews;
     m_Impl->MarkDescriptorsDirty(binding);
 }
 
-void RayTracingShader::Dispatch(
+void RayTracingBindingSet::Dispatch(
     CommandList& commandList,
     std::string_view passName,
     const uint32_t width,
@@ -865,35 +986,43 @@ void RayTracingShader::Dispatch(
     Assert(m_Impl->AccelerationStructure != nullptr, "Ray tracing acceleration structure is not bound.");
 
     m_Impl->BuildShaderTables(pass);
-
     if (m_Impl->DescriptorsDirty)
     {
         m_Impl->RebuildDescriptorAllocation();
         m_Impl->DescriptorsDirty = false;
     }
 
-    for (uint32_t bindingIndex = 0; bindingIndex < m_Impl->Desc.Bindings.size(); ++bindingIndex)
+    const RayTracingShader::Impl& shaderImpl = m_Impl->GetShaderImpl();
+    for (uint32_t bindingIndex = 0; bindingIndex < shaderImpl.Desc.Bindings.size(); ++bindingIndex)
     {
-        const RayTracingShaderBindingDesc& binding = m_Impl->Desc.Bindings[bindingIndex];
+        const RayTracingShaderBindingDesc& binding = shaderImpl.Desc.Bindings[bindingIndex];
         const auto boundBindingIt = m_Impl->BoundBindings.find(bindingIndex);
         const Impl::BoundBinding* boundBinding = boundBindingIt != m_Impl->BoundBindings.end() ? &boundBindingIt->second : nullptr;
 
         if (binding.Type == RayTracingShaderBindingType::OutputTexture)
         {
-            Assert(boundBinding != nullptr && boundBinding->TextureResource != nullptr, "Ray tracing output texture is not bound.");
-            if (boundBinding->TextureResource->AreAutoBarriersEnabled())
+            if (boundBinding != nullptr &&
+                boundBinding->UnorderedAccessView.has_value() &&
+                boundBinding->UnorderedAccessView->m_Resource != nullptr &&
+                boundBinding->UnorderedAccessView->m_Resource->AreAutoBarriersEnabled())
             {
-                commandList.TransitionBarrier(*boundBinding->TextureResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                commandList.TransitionBarrier(*boundBinding->UnorderedAccessView->m_Resource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
             }
         }
         else if (binding.Type == RayTracingShaderBindingType::TextureArray)
         {
-            Assert(boundBinding != nullptr, "Ray tracing texture array is not bound.");
-            for (const ShaderResourceView& shaderResourceView : boundBinding->TextureShaderResourceViews)
+            if (boundBinding == nullptr)
             {
-                if (shaderResourceView.m_Resource->AreAutoBarriersEnabled())
+                continue;
+            }
+
+            for (const auto& shaderResourceView : boundBinding->ShaderResourceViews)
+            {
+                if (shaderResourceView.has_value() &&
+                    shaderResourceView->m_Resource != nullptr &&
+                    shaderResourceView->m_Resource->AreAutoBarriersEnabled())
                 {
-                    commandList.TransitionBarrier(*shaderResourceView.m_Resource, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                    commandList.TransitionBarrier(*shaderResourceView->m_Resource, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
                 }
             }
         }
@@ -907,12 +1036,12 @@ void RayTracingShader::Dispatch(
         }
     }
 
-    commandList.SetRaytracingPipelineState(m_Impl->PipelineState->GetStateObject());
-    commandList.SetComputeRootSignature(m_Impl->PipelineState->GetGlobalRootSignature());
+    commandList.SetRaytracingPipelineState(shaderImpl.PipelineState->GetStateObject());
+    commandList.SetComputeRootSignature(shaderImpl.PipelineState->GetGlobalRootSignature());
 
-    for (uint32_t bindingIndex = 0; bindingIndex < m_Impl->Desc.Bindings.size(); ++bindingIndex)
+    for (uint32_t bindingIndex = 0; bindingIndex < shaderImpl.Desc.Bindings.size(); ++bindingIndex)
     {
-        const RayTracingShaderBindingDesc& binding = m_Impl->Desc.Bindings[bindingIndex];
+        const RayTracingShaderBindingDesc& binding = shaderImpl.Desc.Bindings[bindingIndex];
         const auto boundBindingIt = m_Impl->BoundBindings.find(bindingIndex);
         const Impl::BoundBinding* boundBinding = boundBindingIt != m_Impl->BoundBindings.end() ? &boundBindingIt->second : nullptr;
 
@@ -960,17 +1089,173 @@ void RayTracingShader::Dispatch(
 
     commandList.DispatchRays(dispatchDesc);
 
-    for (uint32_t bindingIndex = 0; bindingIndex < m_Impl->Desc.Bindings.size(); ++bindingIndex)
+    for (uint32_t bindingIndex = 0; bindingIndex < shaderImpl.Desc.Bindings.size(); ++bindingIndex)
     {
-        const RayTracingShaderBindingDesc& binding = m_Impl->Desc.Bindings[bindingIndex];
+        const RayTracingShaderBindingDesc& binding = shaderImpl.Desc.Bindings[bindingIndex];
         if (binding.Type != RayTracingShaderBindingType::OutputTexture)
         {
             continue;
         }
 
         const auto boundBindingIt = m_Impl->BoundBindings.find(bindingIndex);
-        Assert(boundBindingIt != m_Impl->BoundBindings.end() && boundBindingIt->second.TextureResource != nullptr, "Ray tracing output texture is not bound.");
-        commandList.UavBarrier(*boundBindingIt->second.TextureResource);
+        if (boundBindingIt != m_Impl->BoundBindings.end() &&
+            boundBindingIt->second.UnorderedAccessView.has_value() &&
+            boundBindingIt->second.UnorderedAccessView->m_Resource != nullptr)
+        {
+            commandList.UavBarrier(*boundBindingIt->second.UnorderedAccessView->m_Resource);
+        }
     }
+}
+//Modify End
+
+RayTracingShader::RayTracingShader(const ShaderBlob& shaderLibrary)
+    : RayTracingShader(shaderLibrary, CreateDefaultPipelineDesc())
+{}
+
+RayTracingShader::RayTracingShader(const ShaderBlob& shaderLibrary, RayTracingPipelineDesc desc)
+    : m_Impl(std::make_unique<Impl>(shaderLibrary, std::move(desc)))
+{}
+
+RayTracingShader::~RayTracingShader() = default;
+RayTracingShader::RayTracingShader(RayTracingShader&&) noexcept = default;
+RayTracingShader& RayTracingShader::operator=(RayTracingShader&&) noexcept = default;
+
+bool RayTracingShader::IsSupported()
+{
+    D3D12_FEATURE_DATA_D3D12_OPTIONS5 options5 = {};
+    if (FAILED(Application::Get().GetDevice()->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &options5, sizeof(options5))))
+    {
+        return false;
+    }
+
+    return options5.RaytracingTier != D3D12_RAYTRACING_TIER_NOT_SUPPORTED;
+}
+
+const RayTracingPipelineDesc& RayTracingShader::GetDesc() const
+{
+    return m_Impl->Desc;
+}
+
+//Modify Begin:2026-07-24 by BestHui
+RayTracingBindingSet RayTracingShader::CreateBindingSet() const
+{
+    return RayTracingBindingSet(*this);
+}
+
+RayTracingBindingSet& RayTracingShader::GetDefaultBindingSet() const
+{
+    if (m_DefaultBindingSet == nullptr)
+    {
+        m_DefaultBindingSet = std::make_unique<RayTracingBindingSet>(*this);
+    }
+    return *m_DefaultBindingSet;
+}
+//Modify End
+
+bool RayTracingShader::HasBinding(std::string_view name) const
+{
+    return GetDefaultBindingSet().HasBinding(name);
+}
+
+void RayTracingShader::SetTexture(std::string_view name, const ShaderResourceView& shaderResourceView)
+{
+    GetDefaultBindingSet().SetTexture(name, shaderResourceView);
+}
+
+void RayTracingShader::SetTexture(std::string_view name, const uint32_t arrayIndex, const ShaderResourceView& shaderResourceView)
+{
+    GetDefaultBindingSet().SetTexture(name, arrayIndex, shaderResourceView);
+}
+
+void RayTracingShader::SetTexture(std::string_view name, const std::shared_ptr<Resource>& texture)
+{
+    GetDefaultBindingSet().SetTexture(name, texture);
+}
+
+void RayTracingShader::SetShaderResourceView(std::string_view name, const ShaderResourceView& shaderResourceView)
+{
+    GetDefaultBindingSet().SetShaderResourceView(name, shaderResourceView);
+}
+
+void RayTracingShader::SetShaderResourceView(
+    std::string_view name,
+    const uint32_t arrayIndex,
+    const ShaderResourceView& shaderResourceView)
+{
+    GetDefaultBindingSet().SetShaderResourceView(name, arrayIndex, shaderResourceView);
+}
+
+void RayTracingShader::SetUnorderedAccessView(std::string_view name, const UnorderedAccessView& unorderedAccessView)
+{
+    GetDefaultBindingSet().SetUnorderedAccessView(name, unorderedAccessView);
+}
+
+void RayTracingShader::SetBuffer(std::string_view name, const StructuredBuffer& buffer)
+{
+    GetDefaultBindingSet().SetBuffer(name, buffer);
+}
+
+void RayTracingShader::SetOutputTexture(std::string_view name, const std::shared_ptr<Texture>& texture)
+{
+    //Modify Begin:2026-07-24 by BestHui
+    GetDefaultBindingSet().SetOutputTexture(name, texture);
+    //Modify End
+}
+
+void RayTracingShader::SetAccelerationStructure(std::string_view name, const RayTracingAccelerationStructure& accelerationStructure)
+{
+    //Modify Begin:2026-07-24 by BestHui
+    GetDefaultBindingSet().SetAccelerationStructure(name, accelerationStructure);
+    //Modify End
+}
+
+void RayTracingShader::SetConstantBufferData(std::string_view name, const void* data, const size_t size)
+{
+    //Modify Begin:2026-07-24 by BestHui
+    GetDefaultBindingSet().SetConstantBufferData(name, data, size);
+    //Modify End
+}
+
+void RayTracingShader::SetStructuredBuffer(std::string_view name, const StructuredBuffer& buffer)
+{
+    //Modify Begin:2026-07-24 by BestHui
+    GetDefaultBindingSet().SetStructuredBuffer(name, buffer);
+    //Modify End
+}
+
+void RayTracingShader::SetTextureArray(std::string_view name, const std::vector<std::shared_ptr<Texture>>& textures)
+{
+    //Modify Begin:2026-07-24 by BestHui
+    GetDefaultBindingSet().SetTextureArray(name, textures);
+    //Modify End
+}
+
+void RayTracingShader::SetTextureArray(
+    std::string_view name,
+    const std::vector<std::shared_ptr<Texture>>& textures,
+    const std::vector<D3D12_SHADER_RESOURCE_VIEW_DESC>& srvDescs)
+{
+    //Modify Begin:2026-07-24 by BestHui
+    GetDefaultBindingSet().SetTextureArray(name, textures, srvDescs);
+    //Modify End
+}
+
+void RayTracingShader::SetTextureArray(std::string_view name, const std::vector<ShaderResourceView>& shaderResourceViews)
+{
+    //Modify Begin:2026-07-24 by BestHui
+    GetDefaultBindingSet().SetTextureArray(name, shaderResourceViews);
+    //Modify End
+}
+
+void RayTracingShader::Dispatch(
+    CommandList& commandList,
+    std::string_view passName,
+    const uint32_t width,
+    const uint32_t height,
+    const uint32_t depth)
+{
+    //Modify Begin:2026-07-24 by BestHui
+    GetDefaultBindingSet().Dispatch(commandList, passName, width, height, depth);
+    //Modify End
 }
 //Modify End

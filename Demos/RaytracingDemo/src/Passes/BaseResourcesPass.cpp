@@ -10,13 +10,13 @@
 
 using namespace DirectX;
 
-std::unique_ptr<RenderGraph::RenderPass> RaytracingDemoPasses::Builder::CreateGBufferPass(RaytracingDemo& demo)
+std::unique_ptr<RenderGraph::RenderPass> RaytracingDemoPasses::Builder::CreateBaseResourcesPass(RaytracingDemo& demo)
 {
     using namespace RenderGraph;
     using DemoResourceIds = RaytracingDemoRenderGraph::ResourceIds;
 
     return RenderPass::Create(
-        L"GBuffer",
+        L"Base Resources",
         {
             { DemoResourceIds::SetupFinishedToken, InputType::Token }
         },
@@ -26,8 +26,9 @@ std::unique_ptr<RenderGraph::RenderPass> RaytracingDemoPasses::Builder::CreateGB
             { DemoResourceIds::GBufferNormal, OutputType::RenderTarget },
             { DemoResourceIds::GBufferEmissionMetallic, OutputType::RenderTarget },
             { DemoResourceIds::GBufferPosition, OutputType::RenderTarget },
+            { DemoResourceIds::MotionVector, OutputType::RenderTarget },
             { DemoResourceIds::DepthBuffer, OutputType::DepthWrite },
-            { DemoResourceIds::GBufferFinishedToken, OutputType::Token },
+            { DemoResourceIds::BaseResourcesFinishedToken, OutputType::Token },
         },
         [&demo](const RenderContext&, CommandList& cmd)
         {
@@ -35,6 +36,7 @@ std::unique_ptr<RenderGraph::RenderPass> RaytracingDemoPasses::Builder::CreateGB
             demo.m_GBufferShader->Bind(cmd);
 
             const XMMATRIX viewProjection = demo.m_Camera.GetViewMatrix() * demo.m_Camera.GetProjectionMatrix();
+            const XMMATRIX previousViewProjection = demo.m_HasPreviousViewProjection ? demo.m_PreviousViewProjection : viewProjection;
             for (const RaytracingDemo::SceneObject& object : demo.m_SceneObjects)
             {
                 const RaytracingDemo::MaterialData& material = demo.m_Materials[object.MaterialIndex];
@@ -43,6 +45,7 @@ std::unique_ptr<RenderGraph::RenderPass> RaytracingDemoPasses::Builder::CreateGB
                 modelConstants.Model = object.WorldMatrix;
                 modelConstants.ModelViewProjection = object.WorldMatrix * viewProjection;
                 modelConstants.InverseTransposeModel = XMMatrixTranspose(XMMatrixInverse(nullptr, object.WorldMatrix));
+                modelConstants.PreviousModelViewProjection = object.WorldMatrix * previousViewProjection;
                 demo.m_GBufferShader->SetConstantBuffer(cmd, "ModelCBuffer", modelConstants);
 
                 RaytracingDemo::GBufferMaterialConstants materialConstants{};

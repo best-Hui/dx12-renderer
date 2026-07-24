@@ -4,8 +4,6 @@
 cbuffer NrdPrepareConstants : register(b0)
 {
     row_major matrix WorldToView;
-    row_major matrix WorldToClip;
-    row_major matrix PreviousWorldToClip;
     uint Width;
     uint Height;
     uint Padding0;
@@ -16,6 +14,7 @@ Texture2D<float4> GBufferSpecularSmoothness : register(t0);
 Texture2D<float4> GBufferNormal : register(t1);
 Texture2D<float4> GBufferPosition : register(t2);
 Texture2D<float> DepthTexture : register(t3);
+Texture2D<float2> MotionVector : register(t4);
 
 RWTexture2D<float4> NrdNormalRoughness : register(u0);
 RWTexture2D<float> NrdViewZ : register(u1);
@@ -24,12 +23,6 @@ RWTexture2D<float2> NrdMotion : register(u2);
 float3 DecodeDemoNormal(float3 encoded)
 {
     return normalize(encoded * 2.0f - 1.0f);
-}
-
-float2 GetScreenUv(float4 clipPosition)
-{
-    float2 ndc = clipPosition.xy / max(abs(clipPosition.w), 0.0001f);
-    return ndc * float2(0.5f, -0.5f) + 0.5f;
 }
 
 [numthreads(8, 8, 1)]
@@ -57,10 +50,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     float3 normalWs = DecodeDemoNormal(normalSample.xyz);
     float roughness = 1.0f - saturate(specularSmoothness.a);
     float viewZ = mul(float4(position.xyz, 1.0f), WorldToView).z;
-    float2 currentUv = GetScreenUv(mul(float4(position.xyz, 1.0f), WorldToClip));
-    float2 previousUv = GetScreenUv(mul(float4(position.xyz, 1.0f), PreviousWorldToClip));
 
     NrdNormalRoughness[pixel] = NRD_FrontEnd_PackNormalAndRoughness(normalWs, roughness, 0.0f);
     NrdViewZ[pixel] = viewZ;
-    NrdMotion[pixel] = previousUv - currentUv;
+    NrdMotion[pixel] = MotionVector.Load(int3(pixel, 0));
 }

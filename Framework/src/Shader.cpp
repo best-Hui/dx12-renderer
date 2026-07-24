@@ -44,6 +44,26 @@ void Shader::SetMaterialConstantBuffer(CommandList& commandList, size_t size, co
     m_RootSignature->SetMaterialConstantBuffer(commandList, size, data);
 }
 
+//Modify Begin:2026-07-24 by BestHui
+bool Shader::HasConstantBuffer(const std::string& variableName) const
+{
+    return m_VertexShaderMetadata.m_ConstantBuffersNameCache.find(variableName) != m_VertexShaderMetadata.m_ConstantBuffersNameCache.end() ||
+        m_PixelShaderMetadata.m_ConstantBuffersNameCache.find(variableName) != m_PixelShaderMetadata.m_ConstantBuffersNameCache.end();
+}
+
+bool Shader::HasShaderResourceView(const std::string& variableName) const
+{
+    return m_VertexShaderMetadata.m_ShaderResourceViewsNameCache.find(variableName) != m_VertexShaderMetadata.m_ShaderResourceViewsNameCache.end() ||
+        m_PixelShaderMetadata.m_ShaderResourceViewsNameCache.find(variableName) != m_PixelShaderMetadata.m_ShaderResourceViewsNameCache.end();
+}
+
+bool Shader::HasUnorderedAccessView(const std::string& variableName) const
+{
+    return m_VertexShaderMetadata.m_UnorderedAccessViewsNameCache.find(variableName) != m_VertexShaderMetadata.m_UnorderedAccessViewsNameCache.end() ||
+        m_PixelShaderMetadata.m_UnorderedAccessViewsNameCache.find(variableName) != m_PixelShaderMetadata.m_UnorderedAccessViewsNameCache.end();
+}
+//Modify End
+
 void Shader::SetConstantBuffer(CommandList& commandList, const std::string& variableName, size_t size, const void* data)
 {
     const auto bindConstantBuffer = [this, &commandList, size, data](const ShaderUtils::ConstantBufferMetadata& cbufferMetadata)

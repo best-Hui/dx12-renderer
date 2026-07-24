@@ -3,6 +3,7 @@
 
 #include <Framework/RayTracingAccelerationStructure.h>
 #include <Framework/ShaderResourceView.h>
+#include <Framework/UnorderedAccessView.h>
 
 #include <d3d12.h>
 
@@ -17,6 +18,8 @@ class CommandList;
 class ShaderBlob;
 class StructuredBuffer;
 class Texture;
+class Resource;
+class RayTracingShader;
 
 enum class RayTracingShaderBindingType
 {
@@ -36,6 +39,10 @@ struct RayTracingShaderBindingDesc
     uint32_t ShaderRegister = 0;
     uint32_t RegisterSpace = 0;
     uint32_t DescriptorCount = 1;
+    //Modify Begin:2026-07-24 by BestHui
+    D3D12_UNORDERED_ACCESS_VIEW_DESC NullUnorderedAccessViewDesc = {};
+    bool HasNullUnorderedAccessViewDesc = false;
+    //Modify End
 };
 
 struct RayTracingHitGroupDesc
@@ -122,23 +129,26 @@ private:
 };
 //Modify End
 
-class RayTracingShader
+//Modify Begin:2026-07-24 by BestHui
+class RayTracingBindingSet
 {
 public:
-    explicit RayTracingShader(const ShaderBlob& shaderLibrary);
-    RayTracingShader(const ShaderBlob& shaderLibrary, RayTracingPipelineDesc desc);
-    ~RayTracingShader();
+    explicit RayTracingBindingSet(const RayTracingShader& shader);
+    ~RayTracingBindingSet();
 
-    RayTracingShader(const RayTracingShader&) = delete;
-    RayTracingShader& operator=(const RayTracingShader&) = delete;
-    RayTracingShader(RayTracingShader&&) noexcept;
-    RayTracingShader& operator=(RayTracingShader&&) noexcept;
+    RayTracingBindingSet(const RayTracingBindingSet&) = delete;
+    RayTracingBindingSet& operator=(const RayTracingBindingSet&) = delete;
+    RayTracingBindingSet(RayTracingBindingSet&&) noexcept;
+    RayTracingBindingSet& operator=(RayTracingBindingSet&&) noexcept;
 
-    static bool IsSupported();
-    static RayTracingPipelineDesc CreateDefaultPipelineDesc();
-
-    const RayTracingPipelineDesc& GetDesc() const;
-
+    bool HasBinding(std::string_view name) const;
+    void SetTexture(std::string_view name, const ShaderResourceView& shaderResourceView);
+    void SetTexture(std::string_view name, uint32_t arrayIndex, const ShaderResourceView& shaderResourceView);
+    void SetTexture(std::string_view name, const std::shared_ptr<Resource>& texture);
+    void SetShaderResourceView(std::string_view name, const ShaderResourceView& shaderResourceView);
+    void SetShaderResourceView(std::string_view name, uint32_t arrayIndex, const ShaderResourceView& shaderResourceView);
+    void SetUnorderedAccessView(std::string_view name, const UnorderedAccessView& unorderedAccessView);
+    void SetBuffer(std::string_view name, const StructuredBuffer& buffer);
     void SetOutputTexture(std::string_view name, const std::shared_ptr<Texture>& texture);
     void SetAccelerationStructure(std::string_view name, const RayTracingAccelerationStructure& accelerationStructure);
     void SetConstantBufferData(std::string_view name, const void* data, size_t size);
@@ -155,5 +165,59 @@ public:
 private:
     struct Impl;
     std::unique_ptr<Impl> m_Impl;
+};
+//Modify End
+
+class RayTracingShader
+{
+public:
+    explicit RayTracingShader(const ShaderBlob& shaderLibrary);
+    RayTracingShader(const ShaderBlob& shaderLibrary, RayTracingPipelineDesc desc);
+    ~RayTracingShader();
+
+    RayTracingShader(const RayTracingShader&) = delete;
+    RayTracingShader& operator=(const RayTracingShader&) = delete;
+    RayTracingShader(RayTracingShader&&) noexcept;
+    RayTracingShader& operator=(RayTracingShader&&) noexcept;
+
+    static bool IsSupported();
+    static RayTracingPipelineDesc CreateDefaultPipelineDesc();
+
+    const RayTracingPipelineDesc& GetDesc() const;
+    //Modify Begin:2026-07-24 by BestHui
+    RayTracingBindingSet CreateBindingSet() const;
+    //Modify End
+
+    bool HasBinding(std::string_view name) const;
+    void SetTexture(std::string_view name, const ShaderResourceView& shaderResourceView);
+    void SetTexture(std::string_view name, uint32_t arrayIndex, const ShaderResourceView& shaderResourceView);
+    void SetTexture(std::string_view name, const std::shared_ptr<Resource>& texture);
+    void SetShaderResourceView(std::string_view name, const ShaderResourceView& shaderResourceView);
+    void SetShaderResourceView(std::string_view name, uint32_t arrayIndex, const ShaderResourceView& shaderResourceView);
+    void SetUnorderedAccessView(std::string_view name, const UnorderedAccessView& unorderedAccessView);
+    void SetBuffer(std::string_view name, const StructuredBuffer& buffer);
+    void SetOutputTexture(std::string_view name, const std::shared_ptr<Texture>& texture);
+    void SetAccelerationStructure(std::string_view name, const RayTracingAccelerationStructure& accelerationStructure);
+    void SetConstantBufferData(std::string_view name, const void* data, size_t size);
+    void SetStructuredBuffer(std::string_view name, const StructuredBuffer& buffer);
+    void SetTextureArray(std::string_view name, const std::vector<std::shared_ptr<Texture>>& textures);
+    void SetTextureArray(
+        std::string_view name,
+        const std::vector<std::shared_ptr<Texture>>& textures,
+        const std::vector<D3D12_SHADER_RESOURCE_VIEW_DESC>& srvDescs);
+    void SetTextureArray(std::string_view name, const std::vector<ShaderResourceView>& shaderResourceViews);
+
+    void Dispatch(CommandList& commandList, std::string_view passName, uint32_t width, uint32_t height, uint32_t depth = 1);
+
+private:
+    //Modify Begin:2026-07-24 by BestHui
+    RayTracingBindingSet& GetDefaultBindingSet() const;
+    friend class RayTracingBindingSet;
+    //Modify End
+    struct Impl;
+    std::unique_ptr<Impl> m_Impl;
+    //Modify Begin:2026-07-24 by BestHui
+    mutable std::unique_ptr<RayTracingBindingSet> m_DefaultBindingSet;
+    //Modify End
 };
 //Modify End

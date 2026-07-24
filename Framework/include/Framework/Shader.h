@@ -56,6 +56,11 @@ public:
 	}
 
 	void SetMaterialConstantBuffer(CommandList& commandList, size_t size, const void* data);
+//Modify Begin:2026-07-24 by BestHui
+	bool HasConstantBuffer(const std::string& variableName) const;
+	bool HasShaderResourceView(const std::string& variableName) const;
+	bool HasUnorderedAccessView(const std::string& variableName) const;
+//Modify End
 	void SetConstantBuffer(CommandList& commandList, const std::string& variableName, size_t size, const void* data);
 
 	template<typename T>

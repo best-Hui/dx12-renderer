@@ -140,6 +140,44 @@ void ComputeShader::SetComputeConstantBuffer(CommandList& commandList, size_t si
     m_CommonRootSignature->SetComputeConstantBuffer(commandList, size, data);
 }
 
+bool ComputeShader::HasConstantBuffer(const std::string& variableName) const
+{
+    if (m_UseReflectedRootSignature)
+    {
+        const auto& bindings = m_DescriptorLayout->GetBindings();
+        const auto findResult = bindings.find(variableName);
+        return findResult != bindings.end() && findResult->second.Kind == DescriptorBindingKind::ConstantBuffer;
+    }
+
+    return m_ShaderMetadata.m_ConstantBuffersNameCache.find(variableName) != m_ShaderMetadata.m_ConstantBuffersNameCache.end();
+}
+
+bool ComputeShader::HasShaderResourceView(const std::string& variableName) const
+{
+    if (m_UseReflectedRootSignature)
+    {
+        const auto& bindings = m_DescriptorLayout->GetBindings();
+        const auto findResult = bindings.find(variableName);
+        return findResult != bindings.end() &&
+            (findResult->second.Kind == DescriptorBindingKind::ShaderResourceView ||
+                findResult->second.Kind == DescriptorBindingKind::AccelerationStructure);
+    }
+
+    return m_ShaderMetadata.m_ShaderResourceViewsNameCache.find(variableName) != m_ShaderMetadata.m_ShaderResourceViewsNameCache.end();
+}
+
+bool ComputeShader::HasUnorderedAccessView(const std::string& variableName) const
+{
+    if (m_UseReflectedRootSignature)
+    {
+        const auto& bindings = m_DescriptorLayout->GetBindings();
+        const auto findResult = bindings.find(variableName);
+        return findResult != bindings.end() && findResult->second.Kind == DescriptorBindingKind::UnorderedAccessView;
+    }
+
+    return m_ShaderMetadata.m_UnorderedAccessViewsNameCache.find(variableName) != m_ShaderMetadata.m_UnorderedAccessViewsNameCache.end();
+}
+
 void ComputeShader::SetConstantBuffer(CommandList& commandList, const std::string& variableName, size_t size, const void* data) const
 {
     if (m_UseReflectedRootSignature)

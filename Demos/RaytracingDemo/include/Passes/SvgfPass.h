@@ -16,7 +16,7 @@ class SvgfPass
 public:
     struct Settings
     {
-        uint32_t AtrousIterations = 4;
+        uint32_t AtrousIterations = 1;
         float TemporalAlpha = 0.08f;
         float MomentsAlpha = 0.2f;
         float PhiColor = 4.0f;
@@ -38,6 +38,7 @@ public:
         const std::shared_ptr<Texture>& noisyRadiance,
         const std::shared_ptr<Texture>& gBufferNormal,
         const std::shared_ptr<Texture>& gBufferPosition,
+        const std::shared_ptr<Texture>& motionVector,
         const std::shared_ptr<Texture>& gBufferAlbedoOcclusion,
         const std::shared_ptr<Texture>& gBufferEmissionMetallic,
         const std::shared_ptr<Texture>& depthTexture,
@@ -51,7 +52,7 @@ private:
         uint32_t Width = 1;
         uint32_t Height = 1;
         uint32_t ResetHistory = 1;
-        uint32_t Padding0 = 0;
+        uint32_t Padding1 = 0;
         float TemporalAlpha = 0.08f;
         float MomentsAlpha = 0.2f;
         float PhiNormal = 64.0f;
@@ -84,6 +85,7 @@ private:
         const std::shared_ptr<Texture>& noisyRadiance,
         const std::shared_ptr<Texture>& gBufferNormal,
         const std::shared_ptr<Texture>& gBufferPosition,
+        const std::shared_ptr<Texture>& motionVector,
         const std::shared_ptr<Texture>& depthTexture,
         uint32_t width,
         uint32_t height);

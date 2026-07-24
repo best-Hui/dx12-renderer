@@ -304,6 +304,7 @@ void NrdPass::PrepareInputs(
     const std::shared_ptr<Texture>& gBufferNormal,
     const std::shared_ptr<Texture>& gBufferPosition,
     const std::shared_ptr<Texture>& depthTexture,
+    const std::shared_ptr<Texture>& motionVector,
     const std::shared_ptr<Texture>& nrdNormalRoughness,
     const std::shared_ptr<Texture>& nrdViewZ,
     const std::shared_ptr<Texture>& nrdMotion,
@@ -312,12 +313,7 @@ void NrdPass::PrepareInputs(
 {
     PrepareConstants constants = {};
     const XMMATRIX currentView = demo.m_Camera.GetViewMatrix();
-    const XMMATRIX currentProjection = demo.m_Camera.GetProjectionMatrix();
-    const XMMATRIX previousView = m_HasPreviousFrame ? m_PreviousView : currentView;
-    const XMMATRIX previousProjection = m_HasPreviousFrame ? m_PreviousProjection : currentProjection;
     constants.WorldToView = currentView;
-    constants.WorldToClip = currentView * currentProjection;
-    constants.PreviousWorldToClip = previousView * previousProjection;
     constants.Width = width;
     constants.Height = height;
 
@@ -327,11 +323,34 @@ void NrdPass::PrepareInputs(
     commandList.SetTexture(*m_PrepareShader, "GBufferNormal", ShaderResourceView(gBufferNormal));
     commandList.SetTexture(*m_PrepareShader, "GBufferPosition", ShaderResourceView(gBufferPosition));
     commandList.SetTexture(*m_PrepareShader, "DepthTexture", ShaderResourceView::DepthAsFloat(depthTexture));
+    commandList.SetTexture(*m_PrepareShader, "MotionVector", ShaderResourceView(motionVector));
     m_PrepareShader->SetUnorderedAccessView(commandList, "NrdNormalRoughness", UnorderedAccessView(nrdNormalRoughness));
     m_PrepareShader->SetUnorderedAccessView(commandList, "NrdViewZ", UnorderedAccessView(nrdViewZ));
     m_PrepareShader->SetUnorderedAccessView(commandList, "NrdMotion", UnorderedAccessView(nrdMotion));
     m_PrepareShader->Bind(commandList);
     commandList.Dispatch((width + 7u) / 8u, (height + 7u) / 8u, 1u);
+}
+
+void NrdPass::PrepareDenoiserInputs(
+    RaytracingDemo& demo,
+    CommandList& commandList,
+    const std::shared_ptr<Texture>& gBufferSpecularSmoothness,
+    const std::shared_ptr<Texture>& gBufferNormal,
+    const std::shared_ptr<Texture>& gBufferPosition,
+    const std::shared_ptr<Texture>& depthTexture,
+    const std::shared_ptr<Texture>& motionVector,
+    const std::shared_ptr<Texture>& nrdNormalRoughness,
+    const std::shared_ptr<Texture>& nrdViewZ,
+    const std::shared_ptr<Texture>& nrdMotion,
+    const uint32_t width,
+    const uint32_t height)
+{
+    if (!IsEnabled() || !EnsureCreated(width, height) || m_BypassDenoise)
+    {
+        return;
+    }
+
+    PrepareInputs(demo, commandList, gBufferSpecularSmoothness, gBufferNormal, gBufferPosition, depthTexture, motionVector, nrdNormalRoughness, nrdViewZ, nrdMotion, width, height);
 }
 
 void NrdPass::Denoise(
@@ -541,10 +560,7 @@ void NrdPass::Execute(
     CommandList& commandList,
     const std::shared_ptr<Texture>& noisyRadiance,
     const std::shared_ptr<Texture>& gBufferAlbedoOcclusion,
-    const std::shared_ptr<Texture>& gBufferSpecularSmoothness,
-    const std::shared_ptr<Texture>& gBufferNormal,
     const std::shared_ptr<Texture>& gBufferEmissionMetallic,
-    const std::shared_ptr<Texture>& gBufferPosition,
     const std::shared_ptr<Texture>& depthTexture,
     const std::shared_ptr<Texture>& nrdNormalRoughness,
     const std::shared_ptr<Texture>& nrdViewZ,
@@ -564,7 +580,6 @@ void NrdPass::Execute(
         return;
     }
 
-    PrepareInputs(demo, commandList, gBufferSpecularSmoothness, gBufferNormal, gBufferPosition, depthTexture, nrdNormalRoughness, nrdViewZ, nrdMotion, width, height);
     Denoise(demo, commandList, noisyRadiance, nrdNormalRoughness, nrdViewZ, nrdMotion, denoisedRadiance, width, height);
     Composite(commandList, denoisedRadiance, depthTexture, gBufferAlbedoOcclusion, gBufferEmissionMetallic, output, width, height);
 }

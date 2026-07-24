@@ -20,12 +20,27 @@ float3 ApplyClosestHitCooperativeVector(float3 color)
 #include "PathTracingShared.hlsli"
 
 [shader("raygeneration")]
-void RayGen()
+void DirectLightingRayGen()
 {
     uint2 pixel = DispatchRaysIndex().xy;
     uint2 dimensions = DispatchRaysDimensions().xy;
 
-    WritePathTracingOutput(pixel, dimensions.x, Camera_FrameIndex);
+    WriteDirectLightingOutput(pixel, dimensions.x, Camera_FrameIndex);
+}
+
+[shader("raygeneration")]
+void RayGen()
+{
+    DirectLightingRayGen();
+}
+
+[shader("raygeneration")]
+void IndirectLightingRayGen()
+{
+    uint2 pixel = DispatchRaysIndex().xy;
+    uint2 dimensions = DispatchRaysDimensions().xy;
+
+    WriteIndirectLightingOutput(pixel, dimensions.x, Camera_FrameIndex);
 }
 
 [shader("miss")]

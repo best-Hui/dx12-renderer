@@ -326,10 +326,10 @@ float3 EvaluateDirectLighting(SurfaceData surface, inout uint rngState)
     return EvaluateAreaLight(AreaLights[lightIndex], surface, rngState) * float(totalLightCount);
 }
 
-float3 TraceGBufferPath(SurfaceData surface, inout uint rngState, out float nrdDiffuseHitDistance)
+float3 TraceIndirectLighting(SurfaceData surface, inout uint rngState, out float nrdDiffuseHitDistance)
 {
     nrdDiffuseHitDistance = 0.0f;
-    float3 radiance = EvaluateDirectLighting(surface, rngState);
+    float3 radiance = 0.0f;
     float3 throughput = 1.0f;
     float3 viewDirection = normalize(Camera_Position.xyz - surface.PositionWs);
     float3 direction = 0.0f;
@@ -388,44 +388,31 @@ float3 TraceGBufferPath(SurfaceData surface, inout uint rngState, out float nrdD
     return radiance;
 }
 
-void WritePathTracingOutput(uint2 pixel, uint width, uint frameIndex)
+void WriteDirectLightingOutput(uint2 pixel, uint width, uint frameIndex)
 {
     SurfaceData surface = LoadGBufferSurface(pixel);
     if (!surface.Valid)
     {
-        float2 uv = (float2(pixel) + 0.5f) / float2(Camera_Width, Camera_Height);
-        float4 clip = float4(uv * 2.0f - 1.0f, 1.0f, 1.0f);
-        clip.y = -clip.y;
-        float4 view = mul(clip, Camera_InverseProjection);
-        view.xyz /= max(view.w, 0.0001f);
-        float3 skyDirection = normalize(mul(float4(normalize(view.xyz), 0.0f), Camera_InverseView).xyz);
-        NrdNoisyRadiance[pixel] = PackNrdDiffuseRadianceHitDistance(SampleSkybox(skyDirection), 0.0f, 1000000.0f, 1.0f);
+        DirectLighting[pixel] = 0.0f;
         return;
     }
 
-    uint rngState = Hash(pixel.x + pixel.y * width + frameIndex * 9781u);
+    uint rngState = InitializeRandomState(pixel, width, frameIndex, 0x1234abcdu);
+    DirectLighting[pixel] = float4(EvaluateDirectLighting(surface, rngState), 1.0f);
+}
+
+void WriteIndirectLightingOutput(uint2 pixel, uint width, uint frameIndex)
+{
+    SurfaceData surface = LoadGBufferSurface(pixel);
+    if (!surface.Valid)
+    {
+        IndirectLighting[pixel] = 0.0f;
+        return;
+    }
+
+    uint rngState = InitializeRandomState(pixel, width, frameIndex, 0x9E3779B9u);
     float nrdDiffuseHitDistance = 0.0f;
-    float3 sampleColor = TraceGBufferPath(surface, rngState, nrdDiffuseHitDistance);
-    float viewZ = max(0.001f, dot(surface.PositionWs - Camera_Position.xyz, normalize(mul(float4(0.0f, 0.0f, 1.0f, 0.0f), Camera_InverseView).xyz)));
-    float3 nrdDemodulation = GetNrdDiffuseDemodulation(surface);
-    NrdNoisyRadiance[pixel] = PackNrdDiffuseRadianceHitDistance(sampleColor / nrdDemodulation, nrdDiffuseHitDistance, viewZ, surface.Roughness);
-
-    if (Camera_AccumulationEnabled == 0u)
-    {
-        Output[pixel] = float4(ToneMap(sampleColor), 1.0f);
-        return;
-    }
-
-    uint previousSampleCount = Camera_AccumulationFrameIndex;
-    float3 accumulatedColor = sampleColor;
-    if (previousSampleCount > 0u)
-    {
-        float3 history = Accumulation[pixel].rgb;
-        accumulatedColor = (history * float(previousSampleCount) + sampleColor) / float(previousSampleCount + 1u);
-    }
-
-    Accumulation[pixel] = float4(accumulatedColor, float(previousSampleCount + 1u));
-    Output[pixel] = float4(ToneMap(accumulatedColor), 1.0f);
+    IndirectLighting[pixel] = float4(TraceIndirectLighting(surface, rngState, nrdDiffuseHitDistance), nrdDiffuseHitDistance);
 }
 
 #endif

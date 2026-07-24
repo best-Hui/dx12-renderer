@@ -10,9 +10,12 @@ std::unique_ptr<RenderGraph::RenderGraphRoot> RenderGraph::User::Create(Raytraci
 {
     std::vector<std::unique_ptr<RenderPass>> renderPasses;
     renderPasses.emplace_back(RaytracingDemoPasses::Builder::CreateSetupPass(demo));
-    renderPasses.emplace_back(RaytracingDemoPasses::Builder::CreateGBufferPass(demo));
+    renderPasses.emplace_back(RaytracingDemoPasses::Builder::CreateBaseResourcesPass(demo));
     renderPasses.emplace_back(RaytracingDemoPasses::Builder::CreateSkyboxPass(demo));
-    renderPasses.emplace_back(RaytracingDemoPasses::Builder::CreatePathTracingPass(demo));
+    renderPasses.emplace_back(RaytracingDemoPasses::Builder::CreateDirectLightingPass(demo));
+    renderPasses.emplace_back(RaytracingDemoPasses::Builder::CreateIndirectLightingPass(demo));
+    renderPasses.emplace_back(RaytracingDemoPasses::Builder::CreateLightingCompositePass(demo));
+    renderPasses.emplace_back(RaytracingDemoPasses::Builder::CreateDenoiserPreparePass(demo));
     renderPasses.emplace_back(RaytracingDemoPasses::Builder::CreateNrdPass(demo));
     renderPasses.emplace_back(RaytracingDemoPasses::Builder::CreateSvgfPass(demo));
     renderPasses.emplace_back(RaytracingDemoPasses::Builder::CreateLightBillboardPass(demo));

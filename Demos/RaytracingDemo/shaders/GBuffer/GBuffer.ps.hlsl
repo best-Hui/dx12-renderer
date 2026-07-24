@@ -7,6 +7,8 @@ struct PixelShaderInput
     float3 TangentWs : TANGENT;
     float3 BitangentWs : BINORMAL;
     float2 Uv : TEXCOORD0;
+    float4 CurrentPositionCs : TEXCOORD1;
+    float4 PreviousPositionCs : TEXCOORD2;
 };
 
 struct PixelShaderOutput
@@ -16,6 +18,7 @@ struct PixelShaderOutput
     float4 Normal : SV_TARGET2;
     float4 EmissionMetallic : SV_TARGET3;
     float4 Position : SV_TARGET4;
+    float2 MotionVector : SV_TARGET5;
 };
 
 cbuffer MaterialCBuffer : register(b0)
@@ -102,6 +105,17 @@ PixelShaderOutput main(PixelShaderInput IN)
     OUT.Normal = float4(EncodeNormal(normalWs), 1.0f);
     OUT.EmissionMetallic = float4(0.0f, 0.0f, 0.0f, metallic);
     OUT.Position = float4(IN.PositionWs, 1.0f);
+    if (IN.CurrentPositionCs.w <= 0.0001f || IN.PreviousPositionCs.w <= 0.0001f)
+    {
+        OUT.MotionVector = 0.0f;
+        return OUT;
+    }
+
+    const float2 currentNdc = IN.CurrentPositionCs.xy / IN.CurrentPositionCs.w;
+    const float2 previousNdc = IN.PreviousPositionCs.xy / IN.PreviousPositionCs.w;
+    const float2 currentUv = currentNdc * float2(0.5f, -0.5f) + 0.5f;
+    const float2 previousUv = previousNdc * float2(0.5f, -0.5f) + 0.5f;
+    OUT.MotionVector = previousUv - currentUv;
 
     return OUT;
 }

@@ -24,6 +24,7 @@
 
 struct GraphicsSettings;
 class CommandList;
+struct RaytracingDemoPassAccess;
 namespace RenderGraph
 {
     class User;
@@ -94,8 +95,10 @@ private:
         uint32_t AccumulationEnabled = 1;
         uint32_t NrdDenoiserMode = 0;
         float NrdReblurHitDistanceScale = 100.0f;
-        uint32_t Padding0 = 0;
+        uint32_t DirectLightingEnabled = 1;
+        uint32_t IndirectLightingEnabled = 1;
         uint32_t Padding1 = 0;
+        uint32_t Padding2 = 0;
         SkyLightData SkyLight = {};
     };
 
@@ -116,7 +119,7 @@ private:
         DirectX::XMMATRIX Model = DirectX::XMMatrixIdentity();
         DirectX::XMMATRIX ModelViewProjection = DirectX::XMMatrixIdentity();
         DirectX::XMMATRIX InverseTransposeModel = DirectX::XMMatrixIdentity();
-        DirectX::XMMATRIX Padding = DirectX::XMMatrixIdentity();
+        DirectX::XMMATRIX PreviousModelViewProjection = DirectX::XMMatrixIdentity();
     };
 
     struct LightBillboardConstants
@@ -217,6 +220,7 @@ private:
     RayTracingSceneResourceLayout BuildRayTracingSceneResourceLayout() const;
     void EnsureRayTracingPipelines();
     void BindRayTracingShaderResources();
+    void BindRayTracingShaderResources(RayTracingBindingSet& shader);
     CameraConstants BuildCameraConstants() const;
     PipelineConstants BuildPipelineConstants() const;
     void ResetAccumulation(bool resetDenoiserHistory = true);
@@ -227,13 +231,18 @@ private:
     void OnImGui();
 
     Camera m_Camera;
+    friend struct RaytracingDemoPassAccess;
     friend class RenderGraph::User;
     friend class RaytracingDemoPasses::Builder;
     friend class NrdPass;
     friend class SvgfPass;
     std::unique_ptr<RenderGraph::RenderGraphRoot> m_RenderGraph;
     std::unique_ptr<RayTracingShader> m_RayTracingShader;
-    std::unique_ptr<ComputeShader> m_InlinePathTracingShader;
+    std::unique_ptr<RayTracingBindingSet> m_DirectRayTracingBindingSet;
+    std::unique_ptr<RayTracingBindingSet> m_IndirectRayTracingBindingSet;
+    std::unique_ptr<ComputeShader> m_InlineDirectLightingShader;
+    std::unique_ptr<ComputeShader> m_InlineIndirectLightingShader;
+    std::unique_ptr<ComputeShader> m_LightingCompositeShader;
     std::unique_ptr<NrdPass> m_NrdPass;
     std::unique_ptr<SvgfPass> m_SvgfPass;
     RayTracingAccelerationStructure m_RayTracingAccelerationStructure;
@@ -285,12 +294,16 @@ private:
     float m_RandomPointLightSpawnRadius = 28.0f;
 
     float m_DeltaTime = 0.0f;
+    DirectX::XMMATRIX m_PreviousViewProjection = DirectX::XMMatrixIdentity();
     uint32_t m_FrameIndex = 0;
     uint32_t m_AccumulationFrameIndex = 0;
     int m_MaxBounces = 1;
     bool m_AccumulationEnabled = true;
+    bool m_DirectLightingEnabled = true;
+    bool m_IndirectLightingEnabled = true;
     DenoiserAlgorithm m_DenoiserAlgorithm = DenoiserAlgorithm::Off;
     bool m_AnimatePointLights = false;
+    bool m_HasPreviousViewProjection = false;
     float m_CameraFov = 45.0f;
     float m_MouseRotateSpeed = 0.1f;
     float m_MousePanSpeed = 0.04f;

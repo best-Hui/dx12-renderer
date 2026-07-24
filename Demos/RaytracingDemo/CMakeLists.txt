@@ -16,7 +16,7 @@ set(SOURCE_FILES
         src/main.cpp
         src/RaytracingDemo.cpp
         src/RenderGraph.User.cpp
-        src/Passes/GBufferPass.cpp
+        src/Passes/BaseResourcesPass.cpp
         src/Passes/ImGuiPass.cpp
         src/Passes/LightBillboardPass.cpp
         src/Passes/NrdPass.cpp
@@ -69,7 +69,9 @@ set(SHADER_FILES_PIXEL
 set(SHADER_FILES_COMPUTE
         shaders/NRD/NrdComposite.cs.hlsl
         shaders/NRD/NrdPrepare.cs.hlsl
-        shaders/PathTracing/InlinePathTracing.cs.hlsl
+        shaders/PathTracing/DirectLighting.cs.hlsl
+        shaders/PathTracing/IndirectLighting.cs.hlsl
+        shaders/PathTracing/LightingComposite.cs.hlsl
         shaders/SVGF/SvgfAtrous.cs.hlsl
         shaders/SVGF/SvgfComposite.cs.hlsl
         shaders/SVGF/SvgfTemporal.cs.hlsl

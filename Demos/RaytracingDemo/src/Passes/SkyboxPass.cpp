@@ -17,7 +17,7 @@ std::unique_ptr<RenderGraph::RenderPass> RaytracingDemoPasses::Builder::CreateSk
     return RenderPass::Create(
         L"Skybox",
         {
-            { DemoResourceIds::GBufferFinishedToken, InputType::Token },
+            { DemoResourceIds::BaseResourcesFinishedToken, InputType::Token },
         },
         {
             { RenderGraph::ResourceIds::GRAPH_OUTPUT, OutputType::RenderTarget },

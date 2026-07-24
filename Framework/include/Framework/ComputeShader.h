@@ -91,6 +91,9 @@ public:
     }
 
     void SetComputeConstantBuffer(CommandList& commandList, size_t size, const void* data) const;
+    bool HasConstantBuffer(const std::string& variableName) const;
+    bool HasShaderResourceView(const std::string& variableName) const;
+    bool HasUnorderedAccessView(const std::string& variableName) const;
     void SetConstantBuffer(CommandList& commandList, const std::string& variableName, size_t size, const void* data) const;
 
     template<typename T>

@@ -6,7 +6,7 @@ cbuffer SvgfTemporalConstants : register(b0)
     uint Width;
     uint Height;
     uint ResetHistory;
-    uint Padding0;
+    uint Padding1;
     float TemporalAlpha;
     float MomentsAlpha;
     float PhiNormal;
@@ -17,8 +17,9 @@ Texture2D<float4> NoisyRadiance : register(t0);
 Texture2D<float4> GBufferNormal : register(t1);
 Texture2D<float4> GBufferPosition : register(t2);
 Texture2D<float> DepthTexture : register(t3);
-Texture2D<float4> HistoryColor : register(t4);
-Texture2D<float2> HistoryMoments : register(t5);
+Texture2D<float2> MotionVector : register(t4);
+Texture2D<float4> HistoryColor : register(t5);
+Texture2D<float2> HistoryMoments : register(t6);
 
 RWTexture2D<float4> TemporalColor : register(u0);
 RWTexture2D<float2> TemporalMoments : register(u1);
@@ -35,12 +36,12 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
     }
 
-    const float depth = DepthTexture.Load(int3(pixel, 0));
     const float4 noisy = NoisyRadiance.Load(int3(pixel, 0));
     const float3 noisyColor = max(noisy.rgb, 0.0f);
     const float luminance = SvgfLuminance(noisyColor);
     const float2 currentMoments = float2(luminance, luminance * luminance);
 
+    const float depth = DepthTexture.Load(int3(pixel, 0));
     if (!SvgfIsValidDepth(depth))
     {
         TemporalColor[pixel] = float4(noisyColor, 1.0f);
@@ -52,16 +53,29 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     }
 
     float historyWeight = 0.0f;
+    float4 previousColor = 0.0f;
+    float2 previousMoments = currentMoments;
     if (ResetHistory == 0u)
     {
-        const float4 previousColor = HistoryColor.Load(int3(pixel, 0));
-        const float2 previousMoments = HistoryMoments.Load(int3(pixel, 0));
-        const float3 normal = DecodeSvgfNormal(GBufferNormal.Load(int3(pixel, 0)).xyz);
-        const float3 position = GBufferPosition.Load(int3(pixel, 0)).xyz;
-        const float normalWeight = SvgfNormalWeight(normal, normal, PhiNormal);
-        const float depthWeight = SvgfDepthWeight(depth, depth, position, position, PhiDepth);
-        historyWeight = saturate(previousColor.a > 0.0f ? normalWeight * depthWeight : 0.0f);
+        const float2 motionUv = MotionVector.Load(int3(pixel, 0));
+        const float2 previousPixelF = float2(pixel) + motionUv * float2(Width, Height);
+        const int2 previousPixel = int2(round(previousPixelF));
+        if (previousPixel.x >= 0 && previousPixel.y >= 0 && previousPixel.x < int(Width) && previousPixel.y < int(Height))
+        {
+            previousColor = HistoryColor.Load(int3(previousPixel, 0));
+            previousMoments = HistoryMoments.Load(int3(previousPixel, 0));
+            const float3 normal = DecodeSvgfNormal(GBufferNormal.Load(int3(pixel, 0)).xyz);
+            const float3 previousNormal = DecodeSvgfNormal(GBufferNormal.Load(int3(previousPixel, 0)).xyz);
+            const float3 position = GBufferPosition.Load(int3(pixel, 0)).xyz;
+            const float3 previousPosition = GBufferPosition.Load(int3(previousPixel, 0)).xyz;
+            const float normalWeight = SvgfNormalWeight(normal, previousNormal, PhiNormal);
+            const float depthWeight = SvgfDepthWeight(depth, depth, position, previousPosition, PhiDepth);
+            historyWeight = saturate(previousColor.a > 0.0f ? normalWeight * depthWeight : 0.0f);
+        }
+    }
 
+    if (historyWeight > 0.0f)
+    {
         const float alpha = lerp(1.0f, TemporalAlpha, historyWeight);
         const float momentsAlpha = lerp(1.0f, MomentsAlpha, historyWeight);
         const float3 accumulatedColor = lerp(previousColor.rgb, noisyColor, alpha);

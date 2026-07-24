@@ -17,7 +17,7 @@ cbuffer ModelCBuffer : register(b0, COMMON_ROOT_SIGNATURE_MODEL_SPACE)
     matrix g_Model_Model;
     matrix g_Model_ModelViewProjection;
     matrix g_Model_InverseTransposeModel;
-    matrix g_Model_Padding;
+    matrix g_Model_PreviousModelViewProjection;
 };
 
 struct VertexAttributes
@@ -36,6 +36,8 @@ struct VertexShaderOutput
     float3 TangentWs : TANGENT;
     float3 BitangentWs : BINORMAL;
     float2 Uv : TEXCOORD0;
+    float4 CurrentPositionCs : TEXCOORD1;
+    float4 PreviousPositionCs : TEXCOORD2;
     float4 PositionCs : SV_POSITION;
 };
 
@@ -49,5 +51,7 @@ VertexShaderOutput main(VertexAttributes IN)
     OUT.BitangentWs = normalize(mul((float3x3)g_Model_Model, IN.BitangentOs));
     OUT.Uv = IN.Uv;
     OUT.PositionCs = mul(g_Model_ModelViewProjection, float4(IN.PositionOs, 1.0f));
+    OUT.CurrentPositionCs = OUT.PositionCs;
+    OUT.PreviousPositionCs = mul(g_Model_PreviousModelViewProjection, float4(IN.PositionOs, 1.0f));
     return OUT;
 }
