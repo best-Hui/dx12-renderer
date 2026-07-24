@@ -44,6 +44,47 @@ void Shader::SetMaterialConstantBuffer(CommandList& commandList, size_t size, co
     m_RootSignature->SetMaterialConstantBuffer(commandList, size, data);
 }
 
+void Shader::SetConstantBuffer(CommandList& commandList, const std::string& variableName, size_t size, const void* data)
+{
+    const auto bindConstantBuffer = [this, &commandList, size, data](const ShaderUtils::ConstantBufferMetadata& cbufferMetadata)
+    {
+        switch (cbufferMetadata.Space)
+        {
+        case CommonRootSignature::MATERIAL_REGISTER_SPACE:
+            m_RootSignature->SetMaterialConstantBuffer(commandList, size, data);
+            break;
+        case CommonRootSignature::MODEL_REGISTER_SPACE:
+            m_RootSignature->SetModelConstantBuffer(commandList, size, data);
+            break;
+        case CommonRootSignature::PIPELINE_REGISTER_SPACE:
+            m_RootSignature->SetPipelineConstantBuffer(commandList, size, data);
+            break;
+        default:
+            throw std::exception("Invalid space index for a constant buffer.");
+        }
+    };
+
+    bool found = false;
+    const auto vsFindResult = m_VertexShaderMetadata.m_ConstantBuffersNameCache.find(variableName);
+    if (vsFindResult != m_VertexShaderMetadata.m_ConstantBuffersNameCache.end())
+    {
+        bindConstantBuffer(m_VertexShaderMetadata.m_ConstantBuffers[vsFindResult->second]);
+        found = true;
+    }
+
+    const auto psFindResult = m_PixelShaderMetadata.m_ConstantBuffersNameCache.find(variableName);
+    if (psFindResult != m_PixelShaderMetadata.m_ConstantBuffersNameCache.end())
+    {
+        bindConstantBuffer(m_PixelShaderMetadata.m_ConstantBuffers[psFindResult->second]);
+        found = true;
+    }
+
+    if (!found)
+    {
+        throw std::exception("Shader variable not found.");
+    }
+}
+
 void Shader::SetShaderResourceView(CommandList& commandList, const std::string& variableName, const ShaderResourceView& shaderResourceView)
 {
     const auto vsFindResult = m_VertexShaderMetadata.m_ShaderResourceViewsNameCache.find(variableName);
@@ -88,6 +129,16 @@ void Shader::SetShaderResourceView(CommandList& commandList, const std::string& 
     {
         throw std::exception("Shader variable not found.");
     }
+}
+
+void Shader::SetTexture(CommandList& commandList, const std::string& variableName, const ShaderResourceView& shaderResourceView)
+{
+    SetShaderResourceView(commandList, variableName, shaderResourceView);
+}
+
+void Shader::SetTexture(CommandList& commandList, const std::string& variableName, const std::shared_ptr<Resource>& texture)
+{
+    SetTexture(commandList, variableName, ShaderResourceView(texture));
 }
 
 //Modify Begin:2026-07-23 by BestHui
@@ -154,40 +205,5 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> Shader::GetPipelineState(const Micro
 
 void Shader::CollectShaderMetadata(const Microsoft::WRL::ComPtr<ID3DBlob>& shader, ShaderMetadata* outMetadata)
 {
-    const auto reflection = ShaderUtils::Reflect(shader);
-
-    // constant buffers
-    {
-        outMetadata->m_ConstantBuffers = std::move(ShaderUtils::GetConstantBuffers(reflection));
-
-        for (size_t i = 0; i < outMetadata->m_ConstantBuffers.size(); ++i)
-        {
-            const auto& cbufferMetadata = outMetadata->m_ConstantBuffers[i];
-            outMetadata->m_ConstantBuffersNameCache.emplace(cbufferMetadata.Name, i);
-        }
-    }
-
-    // shader resource views
-    {
-        outMetadata->m_ShaderResourceViews = std::move(ShaderUtils::GetShaderResourceViews(reflection));
-
-        for (size_t i = 0; i < outMetadata->m_ShaderResourceViews.size(); ++i)
-        {
-            const auto& srvMetadata = outMetadata->m_ShaderResourceViews[i];
-            outMetadata->m_ShaderResourceViewsNameCache.emplace(srvMetadata.Name, i);
-        }
-    }
-
-//Modify Begin:2026-07-23 by BestHui
-    // unordered access views
-    {
-        outMetadata->m_UnorderedAccessViews = std::move(ShaderUtils::GetUnorderedAccessViews(reflection));
-
-        for (size_t i = 0; i < outMetadata->m_UnorderedAccessViews.size(); ++i)
-        {
-            const auto& uavMetadata = outMetadata->m_UnorderedAccessViews[i];
-            outMetadata->m_UnorderedAccessViewsNameCache.emplace(uavMetadata.Name, i);
-        }
-    }
-//Modify End
+    *outMetadata = ShaderReflection::CollectShader(shader);
 }

@@ -127,6 +127,16 @@ void Material::SetShaderResourceView(const std::string& name, const ShaderResour
     SetVariable<uint32_t>("has_" + name, 1u, false);
 }
 
+void Material::SetTexture(const std::string& name, const ShaderResourceView& shaderResourceView)
+{
+    SetShaderResourceView(name, shaderResourceView);
+}
+
+void Material::SetTexture(CommandList&, const std::string& name, const ShaderResourceView& shaderResourceView)
+{
+    SetTexture(name, shaderResourceView);
+}
+
 void Material::Bind(CommandList& commandList)
 {
     m_Shader->Bind(commandList);

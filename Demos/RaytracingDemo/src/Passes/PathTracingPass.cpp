@@ -5,6 +5,7 @@
 
 #include <DX12Library/CommandList.h>
 #include <DX12Library/Helpers.h>
+#include <Framework/CommonRootSignature.h>
 #include <Framework/Mesh.h>
 #include <Framework/ShaderResourceView.h>
 #include <Framework/UnorderedAccessView.h>
@@ -55,13 +56,18 @@ std::unique_ptr<RenderGraph::RenderPass> RaytracingDemoPasses::Builder::CreatePa
             camera.Height = context.m_Metadata.m_ScreenHeight;
             camera.FrameIndex = static_cast<uint32_t>(context.m_Metadata.m_FrameIndex);
 
+            const uint32_t textureCount = static_cast<uint32_t>(demo.m_Textures.size());
+            const std::vector<std::shared_ptr<Mesh>>& meshes = demo.m_RayTracingAccelerationStructure.GetMeshes();
+            const uint32_t meshCount = static_cast<uint32_t>(meshes.size());
+
+            demo.EnsureRayTracingPipelines();
+            Assert(textureCount <= demo.m_RayTracingSceneResourceLayout.TextureDescriptorCapacity, "Ray tracing texture descriptors exceed the scene descriptor table capacity.");
+            Assert(meshCount <= demo.m_RayTracingSceneResourceLayout.GeometryDescriptorCapacity, "Ray tracing geometry descriptors exceed the scene descriptor table capacity.");
+
             if (demo.m_PathTracingBackend == RaytracingDemo::PathTracingBackend::InlineRayQuery)
             {
-                Assert(demo.m_Textures.size() <= RaytracingDemo::MaxInlineRayTracingTextures, "Inline ray tracing texture count exceeds the fixed descriptor layout.");
-                Assert(demo.m_RayTracingAccelerationStructure.GetMeshes().size() <= RaytracingDemo::MaxInlineRayTracingGeometryBuffers, "Inline ray tracing mesh count exceeds the fixed descriptor layout.");
-
-                demo.m_RootSignature->Bind(cmd);
-                demo.m_InlinePathTracingShader->SetComputeConstantBuffer(cmd, sizeof(camera), &camera);
+                demo.m_InlinePathTracingShader->Bind(cmd);
+                demo.m_InlinePathTracingShader->SetConstantBuffer(cmd, "CameraConstants", camera);
                 demo.m_InlinePathTracingShader->SetAccelerationStructure(cmd, demo.m_RayTracingAccelerationStructure);
                 demo.m_InlinePathTracingShader->SetShaderResourceView(cmd, "GBufferTextures", 0u, ShaderResourceView(albedoOcclusion));
                 demo.m_InlinePathTracingShader->SetShaderResourceView(cmd, "GBufferTextures", 1u, ShaderResourceView(specularSmoothness));
@@ -76,13 +82,11 @@ std::unique_ptr<RenderGraph::RenderPass> RaytracingDemoPasses::Builder::CreatePa
                 demo.m_InlinePathTracingShader->SetShaderResourceView(cmd, "PointLights", 0u, demo.m_PointLightBuffer);
                 demo.m_InlinePathTracingShader->SetShaderResourceView(cmd, "AreaLights", 0u, demo.m_AreaLightBuffer);
 
-                for (uint32_t textureIndex = 0; textureIndex < std::min<uint32_t>(static_cast<uint32_t>(demo.m_Textures.size()), RaytracingDemo::MaxInlineRayTracingTextures); ++textureIndex)
+                for (uint32_t textureIndex = 0; textureIndex < textureCount; ++textureIndex)
                 {
                     demo.m_InlinePathTracingShader->SetShaderResourceView(cmd, "Textures", textureIndex, ShaderResourceView(demo.m_Textures[textureIndex]));
                 }
 
-                const std::vector<std::shared_ptr<Mesh>>& meshes = demo.m_RayTracingAccelerationStructure.GetMeshes();
-                const uint32_t meshCount = std::min<uint32_t>(static_cast<uint32_t>(meshes.size()), RaytracingDemo::MaxInlineRayTracingGeometryBuffers);
                 for (uint32_t meshIndex = 0; meshIndex < meshCount; ++meshIndex)
                 {
                     const Mesh& mesh = *meshes[meshIndex];
@@ -93,7 +97,6 @@ std::unique_ptr<RenderGraph::RenderPass> RaytracingDemoPasses::Builder::CreatePa
                 demo.m_InlinePathTracingShader->SetUnorderedAccessView(cmd, "Output", UnorderedAccessView(output));
                 demo.m_InlinePathTracingShader->SetUnorderedAccessView(cmd, "Accumulation", UnorderedAccessView(accumulation));
                 demo.m_InlinePathTracingShader->SetUnorderedAccessView(cmd, "NrdNoisyRadiance", UnorderedAccessView(nrdNoisyRadiance));
-                demo.m_InlinePathTracingShader->Bind(cmd);
                 cmd.Dispatch((camera.Width + 7u) / 8u, (camera.Height + 7u) / 8u, 1u);
             }
             else

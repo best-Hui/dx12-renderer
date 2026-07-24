@@ -32,7 +32,6 @@ std::unique_ptr<RenderGraph::RenderPass> RaytracingDemoPasses::Builder::CreateGB
         [&demo](const RenderContext&, CommandList& cmd)
         {
             demo.m_RootSignature->Bind(cmd);
-            demo.m_RootSignature->SetPipelineConstantBuffer(cmd, demo.BuildPipelineConstants());
             demo.m_GBufferShader->Bind(cmd);
 
             const XMMATRIX viewProjection = demo.m_Camera.GetViewMatrix() * demo.m_Camera.GetProjectionMatrix();
@@ -44,7 +43,7 @@ std::unique_ptr<RenderGraph::RenderPass> RaytracingDemoPasses::Builder::CreateGB
                 modelConstants.Model = object.WorldMatrix;
                 modelConstants.ModelViewProjection = object.WorldMatrix * viewProjection;
                 modelConstants.InverseTransposeModel = XMMatrixTranspose(XMMatrixInverse(nullptr, object.WorldMatrix));
-                demo.m_RootSignature->SetModelConstantBuffer(cmd, modelConstants);
+                demo.m_GBufferShader->SetConstantBuffer(cmd, "ModelCBuffer", modelConstants);
 
                 RaytracingDemo::GBufferMaterialConstants materialConstants{};
                 materialConstants.Diffuse = material.Diffuse;
@@ -57,12 +56,12 @@ std::unique_ptr<RenderGraph::RenderPass> RaytracingDemoPasses::Builder::CreateGB
                 materialConstants.HasMetallicMap = material.HasMetallicMap;
                 materialConstants.HasRoughnessMap = material.HasRoughnessMap;
                 materialConstants.HasAmbientOcclusionMap = material.HasAmbientOcclusionMap;
-                demo.m_RootSignature->SetMaterialConstantBuffer(cmd, sizeof(materialConstants), &materialConstants);
-                demo.m_RootSignature->SetMaterialShaderResourceView(cmd, 0, ShaderResourceView(demo.m_Textures[material.DiffuseTextureIndex]));
-                demo.m_RootSignature->SetMaterialShaderResourceView(cmd, 1, ShaderResourceView(demo.m_Textures[material.NormalTextureIndex]));
-                demo.m_RootSignature->SetMaterialShaderResourceView(cmd, 2, ShaderResourceView(demo.m_Textures[material.MetallicTextureIndex]));
-                demo.m_RootSignature->SetMaterialShaderResourceView(cmd, 3, ShaderResourceView(demo.m_Textures[material.RoughnessTextureIndex]));
-                demo.m_RootSignature->SetMaterialShaderResourceView(cmd, 4, ShaderResourceView(demo.m_Textures[material.AmbientOcclusionTextureIndex]));
+                demo.m_GBufferShader->SetConstantBuffer(cmd, "MaterialCBuffer", materialConstants);
+                demo.m_GBufferShader->SetTexture(cmd, "DiffuseTexture", ShaderResourceView(demo.m_Textures[material.DiffuseTextureIndex]));
+                demo.m_GBufferShader->SetTexture(cmd, "NormalTexture", ShaderResourceView(demo.m_Textures[material.NormalTextureIndex]));
+                demo.m_GBufferShader->SetTexture(cmd, "MetallicTexture", ShaderResourceView(demo.m_Textures[material.MetallicTextureIndex]));
+                demo.m_GBufferShader->SetTexture(cmd, "RoughnessTexture", ShaderResourceView(demo.m_Textures[material.RoughnessTextureIndex]));
+                demo.m_GBufferShader->SetTexture(cmd, "AmbientOcclusionTexture", ShaderResourceView(demo.m_Textures[material.AmbientOcclusionTextureIndex]));
 
                 object.Model->Draw(cmd);
             }

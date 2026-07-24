@@ -8,9 +8,11 @@
 #include <DX12Library/ShaderUtils.h>
 #include <DX12Library/StructuredBuffer.h>
 #include <DX12Library/Texture.h>
+#include <Framework/DescriptorLayout.h>
 #include <Framework/Mesh.h>
 #include <Framework/RayTracingPipelineStateBuilder.h>
 #include <Framework/ShaderBlob.h>
+#include <Framework/ShaderReflection.h>
 
 #include <d3dx12.h>
 
@@ -96,21 +98,6 @@ namespace
         return desc;
     }
 
-    D3D12_SHADER_RESOURCE_VIEW_DESC CreateNullTextureSrvDesc()
-    {
-        D3D12_SHADER_RESOURCE_VIEW_DESC desc = {};
-        desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-        desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-        desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-        desc.Texture2D.MipLevels = 1;
-        return desc;
-    }
-
-    uint32_t NormalizeDescriptorCount(const uint32_t descriptorCount, const uint32_t maxDescriptorCount)
-    {
-        return descriptorCount == 0u || descriptorCount == UINT32_MAX ? maxDescriptorCount : descriptorCount;
-    }
-
     bool IsBufferSrvDimension(const D3D_SRV_DIMENSION dimension)
     {
         return dimension == D3D_SRV_DIMENSION_BUFFER;
@@ -118,10 +105,7 @@ namespace
 
     bool IsRayTracingAccelerationStructureSrv(const ShaderUtils::ShaderResourceViewMetadata& srv)
     {
-        constexpr int RayTracingAccelerationStructureSrvDimension = 11;
-        return srv.InputType == D3D_SIT_RTACCELERATIONSTRUCTURE ||
-            static_cast<int>(srv.Dimension) == RayTracingAccelerationStructureSrvDimension ||
-            srv.Name == "Scene";
+        return DescriptorLayout::IsRayTracingAccelerationStructureSrv(srv, "Scene");
     }
 
     const char* GetRayTracingBindingTypeName(const RayTracingShaderBindingType type)
@@ -367,7 +351,11 @@ struct RayTracingShader::Impl
 
         const D3D12_SHADER_RESOURCE_VIEW_DESC nullVertexSrvDesc = CreateNullVertexBufferSrvDesc();
         const D3D12_SHADER_RESOURCE_VIEW_DESC nullIndexSrvDesc = CreateNullIndexBufferSrvDesc();
-        const D3D12_SHADER_RESOURCE_VIEW_DESC nullTextureSrvDesc = CreateNullTextureSrvDesc();
+        ShaderUtils::ShaderResourceViewMetadata nullTextureMetadata{};
+        nullTextureMetadata.InputType = D3D_SIT_TEXTURE;
+        nullTextureMetadata.Dimension = D3D_SRV_DIMENSION_TEXTURE2D;
+        const D3D12_SHADER_RESOURCE_VIEW_DESC nullTextureSrvDesc =
+            DescriptorLayout::CreateNullShaderResourceViewDesc(nullTextureMetadata);
 
         for (uint32_t bindingIndex = 0; bindingIndex < Desc.Bindings.size(); ++bindingIndex)
         {
@@ -532,9 +520,9 @@ RayTracingPipelineDescBuilder RayTracingPipelineDescBuilder::ReflectedDefault(co
     RayTracingPipelineDesc desc = RayTracingShader::CreateDefaultPipelineDesc();
     desc.Bindings.clear();
 
-    const auto reflection = ShaderUtils::ReflectLibrary(shaderLibrary.GetBlob());
+    const ShaderReflectionMetadata reflection = ShaderReflection::CollectLibrary(shaderLibrary.GetBlob());
 
-    for (const auto& cbuffer : ShaderUtils::GetConstantBuffers(reflection))
+    for (const auto& cbuffer : reflection.m_ConstantBuffers)
     {
         desc.Bindings.push_back({
             cbuffer.Name,
@@ -545,10 +533,10 @@ RayTracingPipelineDescBuilder RayTracingPipelineDescBuilder::ReflectedDefault(co
         });
     }
 
-    for (const auto& srv : ShaderUtils::GetShaderResourceViews(reflection))
+    for (const auto& srv : reflection.m_ShaderResourceViews)
     {
         RayTracingShaderBindingType bindingType = RayTracingShaderBindingType::StructuredBuffer;
-        const uint32_t descriptorCount = NormalizeDescriptorCount(srv.BindCount, desc.MaxDescriptorCount);
+        const uint32_t descriptorCount = DescriptorLayout::NormalizeDescriptorCount(srv.BindCount, desc.MaxDescriptorCount);
 
         if (IsRayTracingAccelerationStructureSrv(srv))
         {
@@ -576,14 +564,14 @@ RayTracingPipelineDescBuilder RayTracingPipelineDescBuilder::ReflectedDefault(co
         });
     }
 
-    for (const auto& uav : ShaderUtils::GetUnorderedAccessViews(reflection))
+    for (const auto& uav : reflection.m_UnorderedAccessViews)
     {
         desc.Bindings.push_back({
             uav.Name,
             RayTracingShaderBindingType::OutputTexture,
             uav.RegisterIndex,
             uav.Space,
-            NormalizeDescriptorCount(uav.BindCount, desc.MaxDescriptorCount)
+            DescriptorLayout::NormalizeDescriptorCount(uav.BindCount, desc.MaxDescriptorCount)
         });
     }
 
@@ -734,6 +722,26 @@ RayTracingPipelineDescBuilder& RayTracingPipelineDescBuilder::WithBinding(
     const uint32_t registerSpace,
     const uint32_t descriptorCount)
 {
+    const auto existingBinding = std::find_if(
+        m_Desc.Bindings.begin(),
+        m_Desc.Bindings.end(),
+        [&name](const RayTracingShaderBindingDesc& binding)
+        {
+            return binding.Name == name;
+        });
+
+    if (existingBinding != m_Desc.Bindings.end())
+    {
+        *existingBinding = {
+            std::move(name),
+            type,
+            shaderRegister,
+            registerSpace,
+            descriptorCount
+        };
+        return *this;
+    }
+
     m_Desc.Bindings.push_back({
         std::move(name),
         type,

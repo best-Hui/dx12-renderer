@@ -3,6 +3,7 @@
 
 #include "../GBuffer/GBufferSampling.hlsli"
 #include "../Common/RayOffset.hlsli"
+#include "../../../../External/NRD/Shaders/NRD.hlsli"
 #include "PathTracingRandom.hlsli"
 
 float3 SampleSkybox(float3 direction)
@@ -26,9 +27,28 @@ float3 SanitizeNrdRadiance(float3 color)
     return min(max(color, 0.0f), 10000.0f);
 }
 
-float4 PackNrdDiffuseRadianceHitDistance(float3 radiance, float hitDistance)
+float3 GetNrdDiffuseDemodulation(SurfaceData surface)
 {
-    return float4(SanitizeNrdRadiance(radiance), max(0.0f, hitDistance));
+    float metallic = saturate(surface.Metallic);
+    float3 diffuseFactor = max(surface.Diffuse * (1.0f - metallic), 0.05f);
+    return lerp(diffuseFactor, float3(1.0f, 1.0f, 1.0f), metallic);
+}
+
+float4 PackNrdDiffuseRadianceHitDistance(float3 radiance, float hitDistance, float viewZ, float roughness)
+{
+    radiance = SanitizeNrdRadiance(radiance);
+    if (Camera_NrdDenoiserMode == 1u)
+    {
+        float3 hitDistanceParams = float3(3.0f, 0.1f, 20.0f);
+        float normHitDistance = REBLUR_FrontEnd_GetNormHitDist(
+            max(0.0f, hitDistance),
+            viewZ,
+            hitDistanceParams,
+            max(0.001f, roughness));
+        return REBLUR_FrontEnd_PackRadianceAndNormHitDist(radiance, normHitDistance, false);
+    }
+
+    return RELAX_FrontEnd_PackRadianceAndHitDist(radiance, max(0.0f, hitDistance), false);
 }
 
 bool IsVisibleAlongRay(float3 origin, float3 direction, float tMax)
@@ -96,6 +116,104 @@ float3 EvaluatePbrLighting(SurfaceData surface, float3 lightDirectionWs, float3 
     const float3 specular = (d * g * f) / max(0.0001f, 4.0f * nDotV * nDotL);
     const float3 kd = (1.0f - f) * (1.0f - metallic);
     return (kd * surface.Diffuse * INV_PI + specular) * radiance * nDotL * surface.AmbientOcclusion;
+}
+
+float Luminance(float3 color)
+{
+    return dot(color, float3(0.2126f, 0.7152f, 0.0722f));
+}
+
+float MaxComponent(float3 value)
+{
+    return max(value.r, max(value.g, value.b));
+}
+
+float3 GetSurfaceF0(SurfaceData surface)
+{
+    return lerp(surface.Specular, surface.Diffuse, saturate(surface.Metallic));
+}
+
+float3 EvaluatePbrBrdf(SurfaceData surface, float3 viewDirectionWs, float3 lightDirectionWs)
+{
+    float3 normalWs = normalize(surface.NormalWs);
+    float3 halfVectorWs = normalize(viewDirectionWs + lightDirectionWs);
+    float roughness = max(0.04f, surface.Roughness);
+    float metallic = saturate(surface.Metallic);
+    float nDotV = saturate(dot(normalWs, viewDirectionWs));
+    float nDotL = saturate(dot(normalWs, lightDirectionWs));
+    float vDotH = saturate(dot(viewDirectionWs, halfVectorWs));
+    if (nDotV <= 0.0f || nDotL <= 0.0f || vDotH <= 0.0f)
+    {
+        return 0.0f;
+    }
+
+    float3 f0 = GetSurfaceF0(surface);
+    float3 f = FresnelSchlick(vDotH, f0);
+    float d = DistributionGGX(normalWs, halfVectorWs, roughness);
+    float g = GeometrySmith(normalWs, viewDirectionWs, lightDirectionWs, roughness);
+    float3 specular = (d * g * f) / max(0.0001f, 4.0f * nDotV * nDotL);
+    float3 kd = (1.0f - f) * (1.0f - metallic);
+    return kd * surface.Diffuse * INV_PI + specular;
+}
+
+bool SamplePbrDirection(SurfaceData surface, float3 viewDirectionWs, inout uint rngState, out float3 directionWs, out float3 sampleWeight)
+{
+    directionWs = 0.0f;
+    sampleWeight = 0.0f;
+
+    float3 normalWs = normalize(surface.NormalWs);
+    viewDirectionWs = normalize(viewDirectionWs);
+    float roughness = max(0.04f, surface.Roughness);
+    float nDotV = saturate(dot(normalWs, viewDirectionWs));
+    if (nDotV <= 0.0f)
+    {
+        return false;
+    }
+
+    float3 f0 = GetSurfaceF0(surface);
+    float3 fresnel = FresnelSchlick(nDotV, f0);
+    float diffuseWeight = Luminance(surface.Diffuse * (1.0f - saturate(surface.Metallic)));
+    float specularWeight = MaxComponent(fresnel);
+    float specularProbability = specularWeight / max(0.0001f, diffuseWeight + specularWeight);
+    specularProbability = clamp(specularProbability, 0.05f, 0.95f);
+
+    bool sampleSpecular = Random01(rngState) < specularProbability;
+    if (sampleSpecular)
+    {
+        float3 halfVectorWs = SampleGGXHalfVector(normalWs, roughness, rngState);
+        if (dot(halfVectorWs, viewDirectionWs) < 0.0f)
+        {
+            halfVectorWs = -halfVectorWs;
+        }
+        directionWs = normalize(reflect(-viewDirectionWs, halfVectorWs));
+    }
+    else
+    {
+        directionWs = SampleCosineHemisphere(normalWs, rngState);
+    }
+
+    float nDotL = saturate(dot(normalWs, directionWs));
+    if (nDotL <= 0.0f)
+    {
+        return false;
+    }
+
+    float3 halfVector = normalize(viewDirectionWs + directionWs);
+    float nDotH = saturate(dot(normalWs, halfVector));
+    float vDotH = saturate(dot(viewDirectionWs, halfVector));
+    float diffusePdf = nDotL * INV_PI;
+    float specularPdf = DistributionGGX(normalWs, halfVector, roughness) * nDotH / max(0.0001f, 4.0f * vDotH);
+    float pdf = lerp(diffusePdf, specularPdf, specularProbability);
+    if (pdf <= 0.00001f)
+    {
+        return false;
+    }
+
+    float3 brdf = EvaluatePbrBrdf(surface, viewDirectionWs, directionWs);
+    sampleWeight = brdf * nDotL / pdf;
+    sampleWeight *= surface.AmbientOcclusion;
+    sampleWeight = min(sampleWeight, 16.0f);
+    return MaxComponent(sampleWeight) > 0.0f;
 }
 
 float3 EvaluateDirectionalLight(DirectionalLightData light, SurfaceData surface)
@@ -211,10 +329,16 @@ float3 EvaluateDirectLighting(SurfaceData surface, inout uint rngState)
 float3 TraceGBufferPath(SurfaceData surface, inout uint rngState, out float nrdDiffuseHitDistance)
 {
     nrdDiffuseHitDistance = 0.0f;
-    float3 diffuseColor = surface.Diffuse * (1.0f - surface.Metallic);
     float3 radiance = EvaluateDirectLighting(surface, rngState);
-    float3 throughput = max(diffuseColor, surface.Specular);
-    float3 direction = SampleCosineHemisphere(surface.NormalWs, rngState);
+    float3 throughput = 1.0f;
+    float3 viewDirection = normalize(Camera_Position.xyz - surface.PositionWs);
+    float3 direction = 0.0f;
+    float3 sampleWeight = 0.0f;
+    if (!SamplePbrDirection(surface, viewDirection, rngState, direction, sampleWeight))
+    {
+        return radiance;
+    }
+    throughput *= sampleWeight;
     float3 origin = OffsetRayOrigin(surface.PositionWs, surface.PositionError, surface.NormalWs, direction);
     uint bounceCount = min(Camera_MaxBounces, 5u);
 
@@ -245,18 +369,20 @@ float3 TraceGBufferPath(SurfaceData surface, inout uint rngState, out float nrdD
         hitSurface.AmbientOcclusion = payload.AmbientOcclusion;
         hitSurface.Valid = true;
 
-        float3 normalWs = hitSurface.NormalWs;
-        float3 diffuseColor = hitSurface.Diffuse * (1.0f - hitSurface.Metallic);
         radiance += throughput * EvaluateDirectLighting(hitSurface, rngState);
 
-        throughput *= diffuseColor;
         if (max(throughput.r, max(throughput.g, throughput.b)) < 0.005f)
         {
             break;
         }
 
-        direction = SampleCosineHemisphere(normalWs, rngState);
-        origin = OffsetRayOrigin(positionWs, payload.PositionError, normalWs, direction);
+        viewDirection = -direction;
+        if (!SamplePbrDirection(hitSurface, viewDirection, rngState, direction, sampleWeight))
+        {
+            break;
+        }
+        throughput *= sampleWeight;
+        origin = OffsetRayOrigin(positionWs, payload.PositionError, hitSurface.NormalWs, direction);
     }
 
     return radiance;
@@ -273,14 +399,16 @@ void WritePathTracingOutput(uint2 pixel, uint width, uint frameIndex)
         float4 view = mul(clip, Camera_InverseProjection);
         view.xyz /= max(view.w, 0.0001f);
         float3 skyDirection = normalize(mul(float4(normalize(view.xyz), 0.0f), Camera_InverseView).xyz);
-        NrdNoisyRadiance[pixel] = PackNrdDiffuseRadianceHitDistance(SampleSkybox(skyDirection), 0.0f);
+        NrdNoisyRadiance[pixel] = PackNrdDiffuseRadianceHitDistance(SampleSkybox(skyDirection), 0.0f, 1000000.0f, 1.0f);
         return;
     }
 
     uint rngState = Hash(pixel.x + pixel.y * width + frameIndex * 9781u);
     float nrdDiffuseHitDistance = 0.0f;
     float3 sampleColor = TraceGBufferPath(surface, rngState, nrdDiffuseHitDistance);
-    NrdNoisyRadiance[pixel] = PackNrdDiffuseRadianceHitDistance(sampleColor, nrdDiffuseHitDistance);
+    float viewZ = max(0.001f, dot(surface.PositionWs - Camera_Position.xyz, normalize(mul(float4(0.0f, 0.0f, 1.0f, 0.0f), Camera_InverseView).xyz)));
+    float3 nrdDemodulation = GetNrdDiffuseDemodulation(surface);
+    NrdNoisyRadiance[pixel] = PackNrdDiffuseRadianceHitDistance(sampleColor / nrdDemodulation, nrdDiffuseHitDistance, viewZ, surface.Roughness);
 
     if (Camera_AccumulationEnabled == 0u)
     {

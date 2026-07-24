@@ -7,7 +7,6 @@
 //Modify Begin:2026-07-21 by BestHui
 #define COMMON_ROOT_SIGNATURE_INLINE_RAYTRACING_SPACE space4
 //Modify End
-
 #define ROOT_CONSTANTS_BEGIN cbuffer RootConstants : register(b0, COMMON_ROOT_SIGNATURE_CONSTANTS_SPACE) {
 #define ROOT_CONSTANTS_END };
 

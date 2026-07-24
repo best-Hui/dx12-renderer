@@ -40,6 +40,8 @@ public:
 	}
 
 	void SetShaderResourceView(const std::string& name, const ShaderResourceView& shaderResourceView);
+	void SetTexture(const std::string& name, const ShaderResourceView& shaderResourceView);
+	void SetTexture(CommandList& commandList, const std::string& name, const ShaderResourceView& shaderResourceView);
 
 	void Bind(CommandList& commandList);
 	void UploadUniforms(CommandList& commandList);

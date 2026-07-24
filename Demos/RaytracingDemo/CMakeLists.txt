@@ -18,6 +18,7 @@ set(SOURCE_FILES
         src/RenderGraph.User.cpp
         src/Passes/GBufferPass.cpp
         src/Passes/ImGuiPass.cpp
+        src/Passes/LightBillboardPass.cpp
         src/Passes/NrdPass.cpp
         src/Passes/NrdRenderPass.cpp
         src/Passes/PathTracingPass.cpp
@@ -50,17 +51,18 @@ set(SHADERS_HEADER_FILES
         shaders/Scene/SceneResources.hlsli
         shaders/Scene/SceneLighting.hlsli
         shaders/SVGF/SvgfCommon.hlsli
-        ${CMAKE_SOURCE_DIR}/External/NRD/Shaders/NRD.hlsli
-        ${CMAKE_SOURCE_DIR}/External/NRD/Shaders/NRDConfig.hlsli
         )
+list(APPEND SHADERS_HEADER_FILES ${SHADER_FILES_RAYTRACING})
 
 set(SHADER_FILES_VERTEX
         shaders/GBuffer/GBuffer.vs.hlsl
+        shaders/LightBillboard/LightBillboard.vs.hlsl
         shaders/Skybox/Skybox.vs.hlsl
         )
 
 set(SHADER_FILES_PIXEL
         shaders/GBuffer/GBuffer.ps.hlsl
+        shaders/LightBillboard/LightBillboard.ps.hlsl
         shaders/Skybox/Skybox.ps.hlsl
         )
 
@@ -77,8 +79,6 @@ set(TARGET_NAME RaytracingDemo)
 include(${CMAKE_SOURCE_DIR}/CMakeIncludes/ProjectBase.cmake)
 include(${CMAKE_SOURCE_DIR}/CMakeIncludes/DemoBase.cmake)
 
-target_sources(${TARGET_NAME} PRIVATE ${SHADER_FILES_RAYTRACING})
-source_group("Resources\\Shaders" FILES ${SHADER_FILES_RAYTRACING})
 set_source_files_properties(${SHADER_FILES_RAYTRACING} PROPERTIES HEADER_FILE_ONLY TRUE)
 
 target_link_libraries(${TARGET_NAME}

@@ -18,6 +18,8 @@ std::unique_ptr<RenderGraph::RenderPass> RaytracingDemoPasses::Builder::CreateSv
             { DemoResourceIds::NrdNoisyRadiance, InputType::ShaderResource },
             { DemoResourceIds::GBufferNormal, InputType::ShaderResource },
             { DemoResourceIds::GBufferPosition, InputType::ShaderResource },
+            { DemoResourceIds::GBufferAlbedoOcclusion, InputType::ShaderResource },
+            { DemoResourceIds::GBufferEmissionMetallic, InputType::ShaderResource },
             { DemoResourceIds::DepthBuffer, InputType::ShaderResource },
         },
         {
@@ -36,6 +38,8 @@ std::unique_ptr<RenderGraph::RenderPass> RaytracingDemoPasses::Builder::CreateSv
                 context.m_ResourcePool->GetTexture(DemoResourceIds::NrdNoisyRadiance),
                 context.m_ResourcePool->GetTexture(DemoResourceIds::GBufferNormal),
                 context.m_ResourcePool->GetTexture(DemoResourceIds::GBufferPosition),
+                context.m_ResourcePool->GetTexture(DemoResourceIds::GBufferAlbedoOcclusion),
+                context.m_ResourcePool->GetTexture(DemoResourceIds::GBufferEmissionMetallic),
                 context.m_ResourcePool->GetTexture(DemoResourceIds::DepthBuffer),
                 context.m_ResourcePool->GetTexture(RenderGraph::ResourceIds::GRAPH_OUTPUT),
                 context.m_Metadata.m_ScreenWidth,

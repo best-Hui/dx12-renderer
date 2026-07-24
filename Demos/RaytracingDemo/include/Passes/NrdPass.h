@@ -70,14 +70,16 @@ public:
     bool IsEnabled() const { return m_Enabled && m_Available; }
     Settings& GetSettings() { return m_Settings; }
     const Settings& GetSettings() const { return m_Settings; }
-    void ResetHistory() { m_FrameIndex = 0; }
+    void ResetHistory();
 
     void Execute(
         RaytracingDemo& demo,
         CommandList& commandList,
         const std::shared_ptr<Texture>& noisyRadiance,
+        const std::shared_ptr<Texture>& gBufferAlbedoOcclusion,
         const std::shared_ptr<Texture>& gBufferSpecularSmoothness,
         const std::shared_ptr<Texture>& gBufferNormal,
+        const std::shared_ptr<Texture>& gBufferEmissionMetallic,
         const std::shared_ptr<Texture>& gBufferPosition,
         const std::shared_ptr<Texture>& depthTexture,
         const std::shared_ptr<Texture>& nrdNormalRoughness,
@@ -91,8 +93,9 @@ public:
 private:
     struct PrepareConstants
     {
-        DirectX::XMFLOAT4 CameraPosition = {};
-        DirectX::XMFLOAT4 CameraForward = {};
+        DirectX::XMMATRIX WorldToView = DirectX::XMMatrixIdentity();
+        DirectX::XMMATRIX WorldToClip = DirectX::XMMatrixIdentity();
+        DirectX::XMMATRIX PreviousWorldToClip = DirectX::XMMatrixIdentity();
         uint32_t Width = 1;
         uint32_t Height = 1;
         uint32_t Padding0 = 0;
@@ -103,7 +106,7 @@ private:
     {
         uint32_t Width = 1;
         uint32_t Height = 1;
-        uint32_t Padding0 = 0;
+        uint32_t DenoiserMode = 0;
         uint32_t Padding1 = 0;
     };
 
@@ -134,6 +137,8 @@ private:
         CommandList& commandList,
         const std::shared_ptr<Texture>& denoisedRadiance,
         const std::shared_ptr<Texture>& depthTexture,
+        const std::shared_ptr<Texture>& gBufferAlbedoOcclusion,
+        const std::shared_ptr<Texture>& gBufferEmissionMetallic,
         const std::shared_ptr<Texture>& output,
         uint32_t width,
         uint32_t height);
@@ -145,9 +150,12 @@ private:
     uint32_t m_Width = 0;
     uint32_t m_Height = 0;
     uint32_t m_FrameIndex = 0;
+    DirectX::XMMATRIX m_PreviousView = DirectX::XMMatrixIdentity();
+    DirectX::XMMATRIX m_PreviousProjection = DirectX::XMMatrixIdentity();
     DenoiserMode m_CreatedMode = DenoiserMode::RelaxDiffuse;
     Settings m_Settings = {};
     bool m_Available = false;
     bool m_Enabled = false;
     bool m_BypassDenoise = false;
+    bool m_HasPreviousFrame = false;
 };

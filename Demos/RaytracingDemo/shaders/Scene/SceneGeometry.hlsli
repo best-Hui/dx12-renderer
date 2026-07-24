@@ -1,9 +1,6 @@
 #ifndef RAYTRACING_DEMO_SCENE_GEOMETRY_HLSLI
 #define RAYTRACING_DEMO_SCENE_GEOMETRY_HLSLI
 
-static const uint MaxRayTracingTextures = 32;
-static const uint MaxRayTracingGeometryBuffers = 256;
-
 struct VertexAttributes
 {
     float4 Position;

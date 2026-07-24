@@ -7,11 +7,11 @@
 
 namespace
 {
-//Modify Begin:2026-07-21 by BestHui
-    constexpr UINT PIPELINE_SRVS_COUNT = 1024;
+//Modify Begin:2026-07-23 by BestHui
+    constexpr UINT MATERIAL_SRVS_COUNT = CommonRootSignature::MATERIAL_SRVS_COUNT;
+    constexpr UINT PIPELINE_SRVS_COUNT = CommonRootSignature::PIPELINE_SRVS_COUNT;
+    constexpr UINT UAVS_COUNT = CommonRootSignature::UAVS_COUNT;
 //Modify End
-    constexpr UINT MATERIAL_SRVS_COUNT = 6;
-    constexpr UINT UAVS_COUNT = 6;
 }
 
 CommonRootSignature::CommonRootSignature(const std::shared_ptr<Resource>& emptyResource)
@@ -117,6 +117,7 @@ void CommonRootSignature::Bind(CommandList& commandList) const
             m_EmptyUAV.GetDescOrNullptr()
         );
     }
+
 }
 
 void CommonRootSignature::SetPipelineConstantBuffer(CommandList& commandList, size_t size, const void* data) const

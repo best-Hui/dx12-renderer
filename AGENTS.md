@@ -28,3 +28,10 @@
 - Prefer existing wrappers and data structures over creating duplicate demo-local abstractions.
 - This is especially important for lights, materials, command list helpers, upload buffers, shader/resource binding, render passes, and RenderGraph resources.
 - Demo code may define GPU packing structures when shader layout requires it, but scene-level concepts should reuse Framework-level types where available.
+
+## Runtime Verification
+
+- For `RaytracingDemo` and graphics/runtime changes, a successful build is not enough to claim the work is correct.
+- Before reporting that the demo runs correctly, launch the Release executable and capture the actual window client content by window handle.
+- Do not rely on fixed screen coordinates, do not move the user's mouse, and do not treat a hidden process surviving briefly as visual verification.
+- The captured image must show a nonblank rendered frame. If the demo exits before capture or the frame is black/white/broken, continue debugging instead of calling it done.

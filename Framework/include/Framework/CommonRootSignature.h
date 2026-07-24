@@ -113,6 +113,11 @@ public:
     static constexpr UINT MODEL_REGISTER_SPACE = 1u;
     static constexpr UINT PIPELINE_REGISTER_SPACE = 2u;
     static constexpr UINT CONSTANTS_REGISTER_SPACE = 3u;
+//Modify Begin:2026-07-23 by BestHui
+    static constexpr UINT MATERIAL_SRVS_COUNT = 6u;
+    static constexpr UINT PIPELINE_SRVS_COUNT = 1024u;
+    static constexpr UINT UAVS_COUNT = 6u;
+//Modify End
 //Modify Begin:2026-07-21 by BestHui
     static constexpr UINT INLINE_RAYTRACING_REGISTER_SPACE = 4u;
     static constexpr UINT INLINE_RAYTRACING_ACCELERATION_STRUCTURE_REGISTER = 0u;

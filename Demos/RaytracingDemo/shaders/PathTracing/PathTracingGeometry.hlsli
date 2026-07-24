@@ -70,34 +70,29 @@ RayPayload MakeTrianglePayload(
         const float3 tangentWs = normalize(mul((float3x3)objectToWorld, tangentOs));
         const float3 bitangentWs = normalize(mul((float3x3)objectToWorld, bitangentOs));
         const float3x3 tbn = float3x3(tangentWs, bitangentWs, normalWs);
-        const uint normalTextureIndex = min(material.NormalTextureIndex, MaxRayTracingTextures - 1u);
-        const float3 normalTs = UnpackNormalMap(Textures[normalTextureIndex].SampleLevel(LinearWrapSampler, uv, 0.0f).xyz);
+        const float3 normalTs = UnpackNormalMap(Textures[material.NormalTextureIndex].SampleLevel(LinearWrapSampler, uv, 0.0f).xyz);
         normalWs = normalize(mul(normalTs, tbn));
     }
 
     normalWs = dot(normalWs, worldRayDirection) > 0.0f ? -normalWs : normalWs;
 
-    const uint textureIndex = min(material.DiffuseTextureIndex, MaxRayTracingTextures - 1u);
-    const float4 texel = material.HasDiffuseMap != 0u ? Textures[textureIndex].SampleLevel(LinearWrapSampler, uv, 0.0f) : 1.0f;
+    const float4 texel = material.HasDiffuseMap != 0u ? Textures[material.DiffuseTextureIndex].SampleLevel(LinearWrapSampler, uv, 0.0f) : 1.0f;
     float metallic = material.Metallic;
     if (material.HasMetallicMap != 0u)
     {
-        const uint metallicTextureIndex = min(material.MetallicTextureIndex, MaxRayTracingTextures - 1u);
-        metallic *= Textures[metallicTextureIndex].SampleLevel(LinearWrapSampler, uv, 0.0f).r;
+        metallic *= Textures[material.MetallicTextureIndex].SampleLevel(LinearWrapSampler, uv, 0.0f).r;
     }
 
     float roughness = material.Roughness;
     if (material.HasRoughnessMap != 0u)
     {
-        const uint roughnessTextureIndex = min(material.RoughnessTextureIndex, MaxRayTracingTextures - 1u);
-        roughness *= Textures[roughnessTextureIndex].SampleLevel(LinearWrapSampler, uv, 0.0f).r;
+        roughness *= Textures[material.RoughnessTextureIndex].SampleLevel(LinearWrapSampler, uv, 0.0f).r;
     }
 
     float ambientOcclusion = 1.0f;
     if (material.HasAmbientOcclusionMap != 0u)
     {
-        const uint ambientOcclusionTextureIndex = min(material.AmbientOcclusionTextureIndex, MaxRayTracingTextures - 1u);
-        ambientOcclusion *= Textures[ambientOcclusionTextureIndex].SampleLevel(LinearWrapSampler, uv, 0.0f).r;
+        ambientOcclusion *= Textures[material.AmbientOcclusionTextureIndex].SampleLevel(LinearWrapSampler, uv, 0.0f).r;
     }
 
     RayPayload payload;

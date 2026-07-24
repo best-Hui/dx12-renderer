@@ -38,6 +38,8 @@ public:
         const std::shared_ptr<Texture>& noisyRadiance,
         const std::shared_ptr<Texture>& gBufferNormal,
         const std::shared_ptr<Texture>& gBufferPosition,
+        const std::shared_ptr<Texture>& gBufferAlbedoOcclusion,
+        const std::shared_ptr<Texture>& gBufferEmissionMetallic,
         const std::shared_ptr<Texture>& depthTexture,
         const std::shared_ptr<Texture>& output,
         uint32_t width,
@@ -95,6 +97,8 @@ private:
     void Composite(
         CommandList& commandList,
         const std::shared_ptr<Texture>& input,
+        const std::shared_ptr<Texture>& gBufferAlbedoOcclusion,
+        const std::shared_ptr<Texture>& gBufferEmissionMetallic,
         const std::shared_ptr<Texture>& depthTexture,
         const std::shared_ptr<Texture>& output,
         uint32_t width,

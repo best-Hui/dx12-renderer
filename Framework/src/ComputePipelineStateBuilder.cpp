@@ -3,6 +3,8 @@
 
 #include <DX12Library/Helpers.h>
 
+ComputePipelineStateBuilder::ComputePipelineStateBuilder() = default;
+
 ComputePipelineStateBuilder::ComputePipelineStateBuilder(std::shared_ptr<RootSignature> rootSignature)
     : m_RootSignature(std::move(rootSignature))
 {
@@ -27,6 +29,14 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> ComputePipelineStateBuilder::Build(M
     Microsoft::WRL::ComPtr<ID3D12PipelineState> pipelineState;
     ThrowIfFailed(device->CreatePipelineState(&pipelineStateStreamDesc, IID_PPV_ARGS(&pipelineState)));
     return pipelineState;
+}
+
+ComputePipelineStateBuilder& ComputePipelineStateBuilder::WithRootSignature(std::shared_ptr<RootSignature> rootSignature)
+{
+    Assert(rootSignature != nullptr, "Root signature cannot be null.");
+
+    m_RootSignature = std::move(rootSignature);
+    return *this;
 }
 
 ComputePipelineStateBuilder& ComputePipelineStateBuilder::WithShader(const Microsoft::WRL::ComPtr<ID3DBlob>& computeShader)

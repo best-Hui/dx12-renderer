@@ -45,6 +45,7 @@ namespace RaytracingDemoRenderGraph
         static inline const RenderGraph::ResourceId RayTracingFinishedToken = RenderGraph::ResourceIds::GetResourceId(L"RaytracingDemo.RayTracingFinished");
         static inline const RenderGraph::ResourceId NrdFinishedToken = RenderGraph::ResourceIds::GetResourceId(L"RaytracingDemo.NrdFinished");
         static inline const RenderGraph::ResourceId DenoiseFinishedToken = RenderGraph::ResourceIds::GetResourceId(L"RaytracingDemo.DenoiseFinished");
+        static inline const RenderGraph::ResourceId LightBillboardFinishedToken = RenderGraph::ResourceIds::GetResourceId(L"RaytracingDemo.LightBillboardFinished");
     };
 
     std::vector<RenderGraph::TextureDescription> CreateTextureDescriptions();

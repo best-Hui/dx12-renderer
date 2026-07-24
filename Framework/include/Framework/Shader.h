@@ -18,6 +18,7 @@
 #include "ShaderResourceView.h"
 #include "RasterPipelineStateBuilder.h"
 #include "ShaderBlob.h"
+#include "ShaderReflection.h"
 //Modify Begin:2026-07-23 by BestHui
 #include "UnorderedAccessView.h"
 //Modify End
@@ -55,27 +56,22 @@ public:
 	}
 
 	void SetMaterialConstantBuffer(CommandList& commandList, size_t size, const void* data);
+	void SetConstantBuffer(CommandList& commandList, const std::string& variableName, size_t size, const void* data);
+
+	template<typename T>
+	void SetConstantBuffer(CommandList& commandList, const std::string& variableName, const T& data)
+	{
+		SetConstantBuffer(commandList, variableName, sizeof(T), &data);
+	}
 
 	void SetShaderResourceView(CommandList& commandList, const std::string& variableName, const ShaderResourceView& shaderResourceView);
+	void SetTexture(CommandList& commandList, const std::string& variableName, const ShaderResourceView& shaderResourceView);
+	void SetTexture(CommandList& commandList, const std::string& variableName, const std::shared_ptr<Resource>& texture);
 //Modify Begin:2026-07-23 by BestHui
 	void SetUnorderedAccessView(CommandList& commandList, const std::string& variableName, const UnorderedAccessView& unorderedAccessView);
 //Modify End
 
-	struct ShaderMetadata
-	{
-		using NameCacheMap = std::map<std::string, size_t>;
-
-		std::vector<ShaderUtils::ConstantBufferMetadata> m_ConstantBuffers{};
-		NameCacheMap m_ConstantBuffersNameCache{};
-
-		std::vector<ShaderUtils::ShaderResourceViewMetadata> m_ShaderResourceViews{};
-		NameCacheMap m_ShaderResourceViewsNameCache{};
-//Modify Begin:2026-07-23 by BestHui
-
-		std::vector<ShaderUtils::UnorderedAccessViewMetadata> m_UnorderedAccessViews{};
-		NameCacheMap m_UnorderedAccessViewsNameCache{};
-//Modify End
-	};
+	using ShaderMetadata = ShaderReflectionMetadata;
 
 	const ShaderMetadata& GetVertexShaderMetadata() const { return m_VertexShaderMetadata; }
 	const ShaderMetadata& GetPixelShaderMetadata() const { return m_PixelShaderMetadata; }

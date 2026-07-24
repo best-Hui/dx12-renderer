@@ -14,7 +14,7 @@ std::unique_ptr<RenderGraph::RenderPass> RaytracingDemoPasses::Builder::CreateIm
     return RenderPass::Create(
         L"ImGui",
         {
-            { DemoResourceIds::DenoiseFinishedToken, InputType::Token },
+            { DemoResourceIds::LightBillboardFinishedToken, InputType::Token },
         },
         {
             { RenderGraph::ResourceIds::GRAPH_OUTPUT, OutputType::RenderTarget },

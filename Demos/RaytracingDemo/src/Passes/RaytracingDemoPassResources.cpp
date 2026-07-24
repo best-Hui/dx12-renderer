@@ -38,6 +38,7 @@ namespace RaytracingDemoRenderGraph
             { ResourceIds::RayTracingFinishedToken },
             { ResourceIds::NrdFinishedToken },
             { ResourceIds::DenoiseFinishedToken },
+            { ResourceIds::LightBillboardFinishedToken },
         };
     }
 }

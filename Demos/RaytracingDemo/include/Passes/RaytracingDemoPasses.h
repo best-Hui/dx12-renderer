@@ -21,6 +21,7 @@ namespace RaytracingDemoPasses
         static std::unique_ptr<RenderGraph::RenderPass> CreatePathTracingPass(RaytracingDemo& demo);
         static std::unique_ptr<RenderGraph::RenderPass> CreateNrdPass(RaytracingDemo& demo);
         static std::unique_ptr<RenderGraph::RenderPass> CreateSvgfPass(RaytracingDemo& demo);
+        static std::unique_ptr<RenderGraph::RenderPass> CreateLightBillboardPass(RaytracingDemo& demo);
         static std::unique_ptr<RenderGraph::RenderPass> CreateImGuiPass(RaytracingDemo& demo);
     };
 }

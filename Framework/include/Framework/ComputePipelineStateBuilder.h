@@ -12,10 +12,12 @@
 class ComputePipelineStateBuilder final
 {
 public:
+    ComputePipelineStateBuilder();
     explicit ComputePipelineStateBuilder(std::shared_ptr<RootSignature> rootSignature);
 
     Microsoft::WRL::ComPtr<ID3D12PipelineState> Build(Microsoft::WRL::ComPtr<ID3D12Device2> device) const;
 
+    ComputePipelineStateBuilder& WithRootSignature(std::shared_ptr<RootSignature> rootSignature);
     ComputePipelineStateBuilder& WithShader(const Microsoft::WRL::ComPtr<ID3DBlob>& computeShader);
 
 private:

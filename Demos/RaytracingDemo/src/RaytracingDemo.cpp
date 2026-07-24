@@ -49,6 +49,13 @@ namespace
         return val < min ? min : val > max ? max : val;
     }
 
+    uint32_t ComputeDescriptorArrayCapacity(const size_t resourceCount, const size_t resourceCapacity)
+    {
+        return static_cast<uint32_t>(std::max<size_t>(
+            RaytracingDemo::MinRayTracingDescriptorArrayCapacity,
+            std::max(resourceCount, resourceCapacity)));
+    }
+
 }
 
 RaytracingDemo::RaytracingDemo(const std::wstring& name, const int width, const int height, GraphicsSettings graphicsSettings)
@@ -125,13 +132,13 @@ bool RaytracingDemo::LoadContent()
     m_ImGui = std::make_unique<ImGuiImpl>(*commandList, *PWindow, m_RootSignature);
 
     m_SkyboxMesh = Mesh::CreateCube(*commandList);
+    m_LightBillboardMesh = Mesh::CreateVerticalQuad(*commandList);
 
     m_GBufferShader = std::make_shared<Shader>(
         m_RootSignature,
         ShaderBlob(L"GBuffer.vs.cso"),
         ShaderBlob(L"GBuffer.ps.cso"),
-        [](RasterPipelineStateBuilder&) {},
-        false);
+        [](RasterPipelineStateBuilder&) {});
 
     m_SkyboxShader = std::make_shared<Shader>(
         m_RootSignature,
@@ -140,15 +147,17 @@ bool RaytracingDemo::LoadContent()
         [](RasterPipelineStateBuilder& builder)
         {
             builder.WithFrontFaceCull().WithDepthTestNoWrite();
-        },
-        false);
+        });
 
-    const ShaderBlob pathTracingShader(L"PathTracing.rt.cso");
-    const RayTracingPipelineDesc rayTracingDesc = RayTracingPipelineDescBuilder::ReflectedDefault(pathTracingShader)
-        .WithPayloadSize(64)
-        .Build();
-    m_RayTracingShader = std::make_unique<RayTracingShader>(pathTracingShader, rayTracingDesc);
-    m_InlinePathTracingShader = std::make_unique<ComputeShader>(m_RootSignature, ShaderBlob(L"InlinePathTracing.cs.cso"));
+    m_LightBillboardShader = std::make_shared<Shader>(
+        m_RootSignature,
+        ShaderBlob(L"LightBillboard.vs.cso"),
+        ShaderBlob(L"LightBillboard.ps.cso"),
+        [](RasterPipelineStateBuilder& builder)
+        {
+            builder.WithAlphaBlend().WithDepthTestNoWrite().WithNoCull();
+        });
+
     m_NrdPass = std::make_unique<NrdPass>(m_RootSignature);
     m_SvgfPass = std::make_unique<SvgfPass>(m_RootSignature);
     ApplyDenoiserSelection();
@@ -158,6 +167,8 @@ bool RaytracingDemo::LoadContent()
     }
 
     AddRaytracingInstances();
+
+    EnsureRayTracingPipelines();
 
     RayTracingAccelerationStructureBuildSettings accelerationStructureSettings{};
     accelerationStructureSettings.AllowUpdate = true;
@@ -177,8 +188,10 @@ bool RaytracingDemo::LoadContent()
 void RaytracingDemo::UnloadContent()
 {
     m_RenderGraph.reset();
+    m_LightBillboardShader.reset();
     m_SkyboxShader.reset();
     m_GBufferShader.reset();
+    m_LightBillboardMesh.reset();
     m_SkyboxMesh.reset();
     m_ImGui.reset();
     m_NrdPass.reset();
@@ -190,6 +203,51 @@ void RaytracingDemo::UnloadContent()
     m_Materials.clear();
     m_Textures.clear();
     m_LightUploadBuffer.reset();
+}
+
+RaytracingDemo::RayTracingSceneResourceLayout RaytracingDemo::BuildRayTracingSceneResourceLayout() const
+{
+    const std::vector<std::shared_ptr<Mesh>>& rayTracingMeshes = m_RayTracingAccelerationStructure.GetMeshes();
+
+    RayTracingSceneResourceLayout layout;
+    layout.TextureDescriptorCapacity = ComputeDescriptorArrayCapacity(m_Textures.size(), m_Textures.capacity());
+    layout.GeometryDescriptorCapacity = ComputeDescriptorArrayCapacity(rayTracingMeshes.size(), rayTracingMeshes.capacity());
+    return layout;
+}
+
+void RaytracingDemo::EnsureRayTracingPipelines()
+{
+    const RayTracingSceneResourceLayout layout = BuildRayTracingSceneResourceLayout();
+    if (m_RayTracingShader != nullptr &&
+        m_InlinePathTracingShader != nullptr &&
+        !(m_RayTracingSceneResourceLayout != layout))
+    {
+        return;
+    }
+
+    m_RayTracingSceneResourceLayout = layout;
+
+    const ShaderBlob pathTracingShader(L"PathTracing.rt.cso");
+    const RayTracingPipelineDesc rayTracingDesc = RayTracingPipelineDescBuilder::ReflectedDefault(pathTracingShader)
+        .WithTextureArray("Textures", 0, 3, layout.TextureDescriptorCapacity)
+        .WithVertexBufferArray("VertexBuffers", 0, 1, layout.GeometryDescriptorCapacity)
+        .WithIndexBufferArray("IndexBuffers", 0, 2, layout.GeometryDescriptorCapacity)
+        .WithPayloadSize(64)
+        .Build();
+    m_RayTracingShader = std::make_unique<RayTracingShader>(pathTracingShader, rayTracingDesc);
+
+    const ShaderBlob inlinePathTracingShader(L"InlinePathTracing.cs.cso");
+    const ComputePipelineDesc inlinePathTracingDesc = ComputePipelineDescBuilder::ReflectedDefault(inlinePathTracingShader)
+        .WithDescriptorArrayCount("Textures", layout.TextureDescriptorCapacity)
+        .WithDescriptorArrayCount("VertexBuffers", layout.GeometryDescriptorCapacity)
+        .WithDescriptorArrayCount("IndexBuffers", layout.GeometryDescriptorCapacity)
+        .Build();
+    m_InlinePathTracingShader = std::make_unique<ComputeShader>(inlinePathTracingShader, inlinePathTracingDesc);
+
+    if (m_RayTracingAccelerationStructure.GetInstanceCount() > 0)
+    {
+        BindRayTracingShaderResources();
+    }
 }
 
 void RaytracingDemo::BindRayTracingShaderResources()
@@ -245,14 +303,14 @@ RaytracingDemo::PipelineConstants RaytracingDemo::BuildPipelineConstants() const
     return pipeline;
 }
 
-void RaytracingDemo::ResetAccumulation()
+void RaytracingDemo::ResetAccumulation(bool resetDenoiserHistory)
 {
     m_AccumulationFrameIndex = 0;
-    if (m_NrdPass != nullptr)
+    if (resetDenoiserHistory && m_NrdPass != nullptr)
     {
         m_NrdPass->ResetHistory();
     }
-    if (m_SvgfPass != nullptr)
+    if (resetDenoiserHistory && m_SvgfPass != nullptr)
     {
         m_SvgfPass->ResetHistory();
     }
@@ -306,10 +364,9 @@ void RaytracingDemo::OnImGui()
         NrdPass::Settings& nrdSettings = m_NrdPass->GetSettings();
         bool nrdChanged = false;
 
-        nrdSettings.Mode = NrdPass::DenoiserMode::RelaxDiffuse;
-        const char* denoiserNames[] = { "RELAX Diffuse" };
+        const char* nrdDenoiserNames[] = { "RELAX Diffuse", "ReBLUR Diffuse" };
         int denoiserMode = static_cast<int>(nrdSettings.Mode);
-        if (ImGui::Combo("Denoiser##NrdMode", &denoiserMode, denoiserNames, 1))
+        if (ImGui::Combo("Denoiser##NrdMode", &denoiserMode, nrdDenoiserNames, 2))
         {
             nrdSettings.Mode = static_cast<NrdPass::DenoiserMode>(denoiserMode);
             nrdChanged = true;
@@ -406,9 +463,14 @@ void RaytracingDemo::OnImGui()
     ImGui::ColorEdit3("New Point Light Color", &m_NewPointLightColor.x);
     ImGui::SliderFloat("New Point Light Intensity", &m_NewPointLightIntensity, 0.0f, 100.0f, "%.1f");
     ImGui::SliderFloat("New Point Light Range", &m_NewPointLightRange, 0.1f, 100.0f, "%.1f");
+    ImGui::SliderFloat("Random Light Spawn Radius", &m_RandomPointLightSpawnRadius, 1.0f, 80.0f, "%.1f");
     if (ImGui::Button("Add Point Light At Origin"))
     {
         AddPointLightAtOrigin();
+    }
+    if (ImGui::Button("Add Random Point Light"))
+    {
+        AddRandomPointLightInUpperHemisphere();
     }
 
     const char* modeNames[] = { "Inline Ray Query", "Shader Table DXR" };
@@ -522,6 +584,7 @@ void RaytracingDemo::LoadDeferredLightingScene(CommandList& commandList)
     m_PointLightPhase.clear();
     m_PointLightOrbitRadius.clear();
     m_PointLightOrbitSpeed.clear();
+    m_PointLightOrbitCenter.clear();
     m_PointLightAnimated.clear();
 
     const uint32_t whiteTexture = AddTexture(commandList, L"Assets/Textures/white.png");
@@ -646,6 +709,7 @@ void RaytracingDemo::CreateDemoLights()
     m_PointLightPhase.reserve(DemoPointLightCount);
     m_PointLightOrbitRadius.reserve(DemoPointLightCount);
     m_PointLightOrbitSpeed.reserve(DemoPointLightCount);
+    m_PointLightOrbitCenter.reserve(DemoPointLightCount);
     m_PointLightAnimated.reserve(DemoPointLightCount);
 
     for (uint32_t i = 0; i < DemoPointLightCount; ++i)
@@ -671,6 +735,7 @@ void RaytracingDemo::CreateDemoLights()
         m_PointLightPhase.push_back(phase);
         m_PointLightOrbitRadius.push_back(radius);
         m_PointLightOrbitSpeed.push_back(speed);
+        m_PointLightOrbitCenter.push_back(orbitCenter);
         m_PointLightAnimated.push_back(1);
     }
 
@@ -705,7 +770,51 @@ void RaytracingDemo::AddPointLightAtOrigin()
     m_PointLightPhase.push_back(0.0f);
     m_PointLightOrbitRadius.push_back(0.0f);
     m_PointLightOrbitSpeed.push_back(0.0f);
+    m_PointLightOrbitCenter.push_back({ 0.0f, 0.0f, 0.0f });
     m_PointLightAnimated.push_back(0);
+
+    UpdatePointLightGpuData(lightIndex);
+    MarkPointLightsDirty(lightIndex, lightIndex + 1);
+    ResetAccumulation();
+}
+
+void RaytracingDemo::AddRandomPointLightInUpperHemisphere()
+{
+    static std::mt19937 rng{ std::random_device{}() };
+    std::uniform_real_distribution<float> unitDistribution(0.0f, 1.0f);
+    std::uniform_real_distribution<float> colorDistribution(0.25f, 1.0f);
+    std::uniform_real_distribution<float> intensityDistribution(8.0f, 36.0f);
+    std::uniform_real_distribution<float> rangeScaleDistribution(0.45f, 1.15f);
+
+    const float spawnRadius = std::max(1.0f, m_RandomPointLightSpawnRadius);
+    const float radius = spawnRadius * std::cbrt(unitDistribution(rng));
+    const float cosTheta = unitDistribution(rng);
+    const float sinTheta = std::sqrt(std::max(0.0f, 1.0f - cosTheta * cosTheta));
+    const float phi = XM_2PI * unitDistribution(rng);
+    const XMFLOAT3 position = {
+        radius * sinTheta * std::cos(phi),
+        radius * cosTheta,
+        radius * sinTheta * std::sin(phi)
+    };
+
+    PointLight light({ position.x, position.y, position.z, 1.0f }, std::max(3.0f, m_NewPointLightRange * rangeScaleDistribution(rng)));
+    light.Color = {
+        colorDistribution(rng),
+        colorDistribution(rng),
+        colorDistribution(rng),
+        intensityDistribution(rng)
+    };
+    light.RecalculateAttenuationCoefficients();
+
+    const float orbitRadius = std::max(1.0f, std::sqrt(position.x * position.x + position.z * position.z));
+    const size_t lightIndex = m_PointLights.size();
+    m_PointLights.push_back(light);
+    m_PointLightBaseY.push_back(position.y);
+    m_PointLightPhase.push_back(phi);
+    m_PointLightOrbitRadius.push_back(orbitRadius);
+    m_PointLightOrbitSpeed.push_back(0.18f + unitDistribution(rng) * 0.55f);
+    m_PointLightOrbitCenter.push_back({ 0.0f, 0.0f, 0.0f });
+    m_PointLightAnimated.push_back(1);
 
     UpdatePointLightGpuData(lightIndex);
     MarkPointLightsDirty(lightIndex, lightIndex + 1);
@@ -725,10 +834,11 @@ void RaytracingDemo::UpdateDynamicLights(float timeSeconds)
         const float radius = i < m_PointLightOrbitRadius.size() ? m_PointLightOrbitRadius[i] : 16.0f;
         const float speed = i < m_PointLightOrbitSpeed.size() ? m_PointLightOrbitSpeed[i] : 0.4f;
         const float phase = i < m_PointLightPhase.size() ? m_PointLightPhase[i] : 0.0f;
+        const XMFLOAT3 orbitCenter = i < m_PointLightOrbitCenter.size() ? m_PointLightOrbitCenter[i] : XMFLOAT3{ -12.0f, 0.0f, 18.0f };
         const float angle = timeSeconds * speed + phase;
-        m_PointLights[i].PositionWs.x = -12.0f + std::cos(angle) * radius;
+        m_PointLights[i].PositionWs.x = orbitCenter.x + std::cos(angle) * radius;
         m_PointLights[i].PositionWs.y = m_PointLightBaseY[i] + std::sin(angle * 1.7f) * 0.75f;
-        m_PointLights[i].PositionWs.z = 18.0f + std::sin(angle) * radius;
+        m_PointLights[i].PositionWs.z = orbitCenter.z + std::sin(angle) * radius;
         UpdatePointLightGpuData(i);
     }
 
@@ -957,7 +1067,7 @@ void RaytracingDemo::OnUpdate(UpdateEventArgs& e)
     if (m_AnimatePointLights)
     {
         UpdateDynamicLights(static_cast<float>(e.TotalTime));
-        ResetAccumulation();
+        ResetAccumulation(false);
     }
 
     const float speedMultiplier = m_CameraController.Shift ? 16.0f : 4.0f;
@@ -971,7 +1081,7 @@ void RaytracingDemo::OnUpdate(UpdateEventArgs& e)
         m_CameraController.Down != 0.0f;
     if (movedByKeyboard)
     {
-        ResetAccumulation();
+        ResetAccumulation(false);
     }
 
     const XMVECTOR cameraTranslate = XMVectorSet(
@@ -1122,7 +1232,7 @@ void RaytracingDemo::OnMouseMoved(MouseMotionEventArgs& e)
         {
             m_CameraController.Pitch = Clamp(m_CameraController.Pitch + e.RelY * m_MouseRotateSpeed, -90.0f, 90.0f);
             m_CameraController.Yaw += e.RelX * m_MouseRotateSpeed;
-            ResetAccumulation();
+            ResetAccumulation(false);
         }
         return;
     }
@@ -1137,7 +1247,7 @@ void RaytracingDemo::OnMouseMoved(MouseMotionEventArgs& e)
                 0.0f,
                 0.0f);
             m_Camera.Translate(cameraPan, Space::Local);
-            ResetAccumulation();
+            ResetAccumulation(false);
         }
         return;
     }
@@ -1152,7 +1262,7 @@ void RaytracingDemo::OnMouseMoved(MouseMotionEventArgs& e)
                 static_cast<float>(e.RelX) * m_MouseDollySpeed,
                 0.0f);
             m_Camera.Translate(cameraForward, Space::Local);
-            ResetAccumulation();
+            ResetAccumulation(false);
         }
     }
 }
@@ -1173,7 +1283,7 @@ void RaytracingDemo::OnMouseWheel(MouseWheelEventArgs& e)
             e.WheelDelta * m_MouseWheelDollySpeed,
             0.0f);
         m_Camera.Translate(cameraForward, Space::Local);
-        ResetAccumulation();
+        ResetAccumulation(false);
     }
 }
 

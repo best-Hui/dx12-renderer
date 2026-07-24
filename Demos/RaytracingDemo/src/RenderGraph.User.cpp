@@ -15,6 +15,7 @@ std::unique_ptr<RenderGraph::RenderGraphRoot> RenderGraph::User::Create(Raytraci
     renderPasses.emplace_back(RaytracingDemoPasses::Builder::CreatePathTracingPass(demo));
     renderPasses.emplace_back(RaytracingDemoPasses::Builder::CreateNrdPass(demo));
     renderPasses.emplace_back(RaytracingDemoPasses::Builder::CreateSvgfPass(demo));
+    renderPasses.emplace_back(RaytracingDemoPasses::Builder::CreateLightBillboardPass(demo));
     renderPasses.emplace_back(RaytracingDemoPasses::Builder::CreateImGuiPass(demo));
 
     return std::make_unique<RenderGraphRoot>(

@@ -41,8 +41,7 @@ public:
 
     RaytracingDemo(const std::wstring& name, int width, int height, GraphicsSettings graphicsSettings);
 
-    static constexpr uint32_t MaxInlineRayTracingTextures = 32;
-    static constexpr uint32_t MaxInlineRayTracingGeometryBuffers = 256;
+    static constexpr uint32_t MinRayTracingDescriptorArrayCapacity = 1;
 
     bool LoadContent() override;
     void UnloadContent() override;
@@ -120,6 +119,14 @@ private:
         DirectX::XMMATRIX Padding = DirectX::XMMatrixIdentity();
     };
 
+    struct LightBillboardConstants
+    {
+        DirectX::XMFLOAT4 PositionAndSize = { 0.0f, 0.0f, 0.0f, 1.0f };
+        DirectX::XMFLOAT4 ColorAndAlpha = { 1.0f, 1.0f, 1.0f, 0.45f };
+        DirectX::XMFLOAT4 CameraRight = { 1.0f, 0.0f, 0.0f, 0.0f };
+        DirectX::XMFLOAT4 CameraUp = { 0.0f, 1.0f, 0.0f, 0.0f };
+    };
+
     struct GBufferMaterialConstants
     {
         DirectX::XMFLOAT4 Diffuse = { 1.0f, 1.0f, 1.0f, 1.0f };
@@ -157,6 +164,18 @@ private:
         Svgf = 2,
     };
 
+    struct RayTracingSceneResourceLayout
+    {
+        uint32_t TextureDescriptorCapacity = MinRayTracingDescriptorArrayCapacity;
+        uint32_t GeometryDescriptorCapacity = MinRayTracingDescriptorArrayCapacity;
+
+        bool operator!=(const RayTracingSceneResourceLayout& other) const
+        {
+            return TextureDescriptorCapacity != other.TextureDescriptorCapacity ||
+                GeometryDescriptorCapacity != other.GeometryDescriptorCapacity;
+        }
+    };
+
     uint32_t AddTexture(CommandList& commandList, const std::wstring& path, TextureUsageType usage = TextureUsageType::Albedo);
     uint32_t AddMaterial(const MaterialData& material);
     uint32_t AddPbrMaterial(
@@ -183,6 +202,7 @@ private:
     void LoadDeferredLightingScene(CommandList& commandList);
     void CreateDemoLights();
     void AddPointLightAtOrigin();
+    void AddRandomPointLightInUpperHemisphere();
     void UpdateDynamicLights(float timeSeconds);
     void InitializeSceneLightBuffers(CommandList& commandList);
     void BuildSceneLightGpuData();
@@ -194,10 +214,12 @@ private:
     void MarkAreaLightsDirty(size_t beginIndex, size_t endIndex);
     void UploadSceneLightBuffers(CommandList& commandList);
     void AddRaytracingInstances();
+    RayTracingSceneResourceLayout BuildRayTracingSceneResourceLayout() const;
+    void EnsureRayTracingPipelines();
     void BindRayTracingShaderResources();
     CameraConstants BuildCameraConstants() const;
     PipelineConstants BuildPipelineConstants() const;
-    void ResetAccumulation();
+    void ResetAccumulation(bool resetDenoiserHistory = true);
     bool IsDenoiserEnabled() const { return m_DenoiserAlgorithm != DenoiserAlgorithm::Off; }
     bool IsNrdDenoiserEnabled() const { return m_DenoiserAlgorithm == DenoiserAlgorithm::Nrd; }
     bool IsSvgfDenoiserEnabled() const { return m_DenoiserAlgorithm == DenoiserAlgorithm::Svgf; }
@@ -224,13 +246,16 @@ private:
     std::shared_ptr<CommonRootSignature> m_RootSignature;
     std::unique_ptr<ImGuiImpl> m_ImGui;
     std::shared_ptr<Mesh> m_SkyboxMesh;
+    std::shared_ptr<Mesh> m_LightBillboardMesh;
     std::shared_ptr<Shader> m_GBufferShader;
     std::shared_ptr<Shader> m_SkyboxShader;
+    std::shared_ptr<Shader> m_LightBillboardShader;
     std::shared_ptr<Texture> m_SkyboxTexture;
 
     std::vector<SceneObject> m_SceneObjects;
     std::vector<MaterialData> m_Materials;
     std::vector<std::shared_ptr<Texture>> m_Textures;
+    RayTracingSceneResourceLayout m_RayTracingSceneResourceLayout;
 
     SkyLightData m_SkyLight;
     std::vector<DirectionalLight> m_DirectionalLights;
@@ -246,6 +271,7 @@ private:
     std::vector<float> m_PointLightPhase;
     std::vector<float> m_PointLightOrbitRadius;
     std::vector<float> m_PointLightOrbitSpeed;
+    std::vector<DirectX::XMFLOAT3> m_PointLightOrbitCenter;
     std::vector<uint8_t> m_PointLightAnimated;
     size_t m_DirectionalLightDirtyBegin = 0;
     size_t m_DirectionalLightDirtyEnd = 0;
@@ -256,6 +282,7 @@ private:
     DirectX::XMFLOAT3 m_NewPointLightColor = { 1.0f, 0.85f, 0.55f };
     float m_NewPointLightIntensity = 18.0f;
     float m_NewPointLightRange = 24.0f;
+    float m_RandomPointLightSpawnRadius = 28.0f;
 
     float m_DeltaTime = 0.0f;
     uint32_t m_FrameIndex = 0;

@@ -27,7 +27,6 @@ std::unique_ptr<RenderGraph::RenderPass> RaytracingDemoPasses::Builder::CreateSk
         [&demo](const RenderContext&, CommandList& cmd)
         {
             demo.m_RootSignature->Bind(cmd);
-            demo.m_RootSignature->SetPipelineConstantBuffer(cmd, demo.BuildPipelineConstants());
 
             const XMMATRIX viewProjection = demo.m_Camera.GetViewMatrix() * demo.m_Camera.GetProjectionMatrix();
             const XMMATRIX modelMatrix = XMMatrixScaling(2.0f, 2.0f, 2.0f) * XMMatrixTranslationFromVector(demo.m_Camera.GetTranslation());
@@ -35,12 +34,10 @@ std::unique_ptr<RenderGraph::RenderPass> RaytracingDemoPasses::Builder::CreateSk
             modelConstants.Model = modelMatrix;
             modelConstants.ModelViewProjection = modelMatrix * viewProjection;
             modelConstants.InverseTransposeModel = XMMatrixTranspose(XMMatrixInverse(nullptr, modelMatrix));
-            demo.m_RootSignature->SetModelConstantBuffer(cmd, modelConstants);
-
-            const auto skyboxSrv = ShaderResourceView::TextureCube(demo.m_SkyboxTexture);
-            demo.m_RootSignature->SetMaterialShaderResourceView(cmd, 0, skyboxSrv);
 
             demo.m_SkyboxShader->Bind(cmd);
+            demo.m_SkyboxShader->SetConstantBuffer(cmd, "ModelCBuffer", modelConstants);
+            cmd.SetTexture(demo.m_SkyboxShader, "SkyboxTexture", ShaderResourceView::TextureCube(demo.m_SkyboxTexture));
             demo.m_SkyboxMesh->Draw(cmd);
             demo.m_SkyboxShader->Unbind(cmd);
         });

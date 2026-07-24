@@ -229,6 +229,12 @@ NrdPass::NrdPass(const std::shared_ptr<CommonRootSignature>& rootSignature)
 
 NrdPass::~NrdPass() = default;
 
+void NrdPass::ResetHistory()
+{
+    m_FrameIndex = 0;
+    m_HasPreviousFrame = false;
+}
+
 bool NrdPass::EnsureCreated(const uint32_t width, const uint32_t height)
 {
     if (!m_Available)
@@ -287,7 +293,7 @@ bool NrdPass::EnsureCreated(const uint32_t width, const uint32_t height)
     m_Width = width;
     m_Height = height;
     m_CreatedMode = m_Settings.Mode;
-    m_FrameIndex = 0;
+    ResetHistory();
     return true;
 }
 
@@ -305,18 +311,22 @@ void NrdPass::PrepareInputs(
     const uint32_t height)
 {
     PrepareConstants constants = {};
-    XMStoreFloat4(&constants.CameraPosition, demo.m_Camera.GetTranslation());
-    const XMVECTOR cameraForward = XMVector3Rotate(XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f), demo.m_Camera.GetRotation());
-    XMStoreFloat4(&constants.CameraForward, cameraForward);
+    const XMMATRIX currentView = demo.m_Camera.GetViewMatrix();
+    const XMMATRIX currentProjection = demo.m_Camera.GetProjectionMatrix();
+    const XMMATRIX previousView = m_HasPreviousFrame ? m_PreviousView : currentView;
+    const XMMATRIX previousProjection = m_HasPreviousFrame ? m_PreviousProjection : currentProjection;
+    constants.WorldToView = currentView;
+    constants.WorldToClip = currentView * currentProjection;
+    constants.PreviousWorldToClip = previousView * previousProjection;
     constants.Width = width;
     constants.Height = height;
 
     m_RootSignature->Bind(commandList);
-    m_RootSignature->SetComputeConstantBuffer(commandList, constants);
-    m_RootSignature->SetComputeShaderResourceView(commandList, 0, ShaderResourceView(gBufferSpecularSmoothness));
-    m_RootSignature->SetComputeShaderResourceView(commandList, 1, ShaderResourceView(gBufferNormal));
-    m_RootSignature->SetComputeShaderResourceView(commandList, 2, ShaderResourceView(gBufferPosition));
-    m_RootSignature->SetComputeShaderResourceView(commandList, 3, ShaderResourceView::DepthAsFloat(depthTexture));
+    m_PrepareShader->SetConstantBuffer(commandList, "NrdPrepareConstants", constants);
+    commandList.SetTexture(*m_PrepareShader, "GBufferSpecularSmoothness", ShaderResourceView(gBufferSpecularSmoothness));
+    commandList.SetTexture(*m_PrepareShader, "GBufferNormal", ShaderResourceView(gBufferNormal));
+    commandList.SetTexture(*m_PrepareShader, "GBufferPosition", ShaderResourceView(gBufferPosition));
+    commandList.SetTexture(*m_PrepareShader, "DepthTexture", ShaderResourceView::DepthAsFloat(depthTexture));
     m_PrepareShader->SetUnorderedAccessView(commandList, "NrdNormalRoughness", UnorderedAccessView(nrdNormalRoughness));
     m_PrepareShader->SetUnorderedAccessView(commandList, "NrdViewZ", UnorderedAccessView(nrdViewZ));
     m_PrepareShader->SetUnorderedAccessView(commandList, "NrdMotion", UnorderedAccessView(nrdMotion));
@@ -336,12 +346,16 @@ void NrdPass::Denoise(
     const uint32_t height)
 {
     nrd::CommonSettings commonSettings = {};
-    StoreColumnMajor(commonSettings.viewToClipMatrix, demo.m_Camera.GetProjectionMatrix());
-    StoreColumnMajor(commonSettings.viewToClipMatrixPrev, demo.m_Camera.GetProjectionMatrix());
-    StoreColumnMajor(commonSettings.worldToViewMatrix, demo.m_Camera.GetViewMatrix());
-    StoreColumnMajor(commonSettings.worldToViewMatrixPrev, demo.m_Camera.GetViewMatrix());
-    commonSettings.motionVectorScale[0] = 0.0f;
-    commonSettings.motionVectorScale[1] = 0.0f;
+    const XMMATRIX currentView = demo.m_Camera.GetViewMatrix();
+    const XMMATRIX currentProjection = demo.m_Camera.GetProjectionMatrix();
+    const XMMATRIX previousView = m_HasPreviousFrame ? m_PreviousView : currentView;
+    const XMMATRIX previousProjection = m_HasPreviousFrame ? m_PreviousProjection : currentProjection;
+    StoreColumnMajor(commonSettings.viewToClipMatrix, currentProjection);
+    StoreColumnMajor(commonSettings.viewToClipMatrixPrev, previousProjection);
+    StoreColumnMajor(commonSettings.worldToViewMatrix, currentView);
+    StoreColumnMajor(commonSettings.worldToViewMatrixPrev, previousView);
+    commonSettings.motionVectorScale[0] = 1.0f;
+    commonSettings.motionVectorScale[1] = 1.0f;
     commonSettings.motionVectorScale[2] = 0.0f;
     commonSettings.resourceSize[0] = static_cast<uint16_t>(width);
     commonSettings.resourceSize[1] = static_cast<uint16_t>(height);
@@ -356,9 +370,11 @@ void NrdPass::Denoise(
     const bool resetHistory = m_FrameIndex == 0;
     commonSettings.frameIndex = m_FrameIndex++;
     commonSettings.accumulationMode = resetHistory ? nrd::AccumulationMode::RESTART : nrd::AccumulationMode::CONTINUE;
-    commonSettings.isMotionVectorInWorldSpace = true;
-    m_Impl->Integration.NewFrame();
+    commonSettings.isMotionVectorInWorldSpace = false;
     m_Impl->Integration.SetCommonSettings(commonSettings);
+    m_PreviousView = currentView;
+    m_PreviousProjection = currentProjection;
+    m_HasPreviousFrame = true;
 
     if (m_Settings.Mode == NrdPass::DenoiserMode::ReblurDiffuse)
     {
@@ -404,6 +420,7 @@ void NrdPass::Denoise(
         relaxSettings.enableRoughnessEdgeStopping = m_Settings.RelaxEnableRoughnessEdgeStopping;
         m_Impl->Integration.SetDenoiserSettings(DIFFUSE_DENOISER_ID, &relaxSettings);
     }
+    m_Impl->Integration.NewFrame();
 
     nrd::ResourceSnapshot snapshot = {};
     snapshot.restoreInitialState = false;
@@ -497,6 +514,8 @@ void NrdPass::Composite(
     CommandList& commandList,
     const std::shared_ptr<Texture>& denoisedRadiance,
     const std::shared_ptr<Texture>& depthTexture,
+    const std::shared_ptr<Texture>& gBufferAlbedoOcclusion,
+    const std::shared_ptr<Texture>& gBufferEmissionMetallic,
     const std::shared_ptr<Texture>& output,
     const uint32_t width,
     const uint32_t height)
@@ -504,11 +523,14 @@ void NrdPass::Composite(
     CompositeConstants constants = {};
     constants.Width = width;
     constants.Height = height;
+    constants.DenoiserMode = static_cast<uint32_t>(m_Settings.Mode);
 
     m_RootSignature->Bind(commandList);
-    m_RootSignature->SetComputeConstantBuffer(commandList, constants);
-    m_RootSignature->SetComputeShaderResourceView(commandList, 0, ShaderResourceView(denoisedRadiance));
-    m_RootSignature->SetComputeShaderResourceView(commandList, 1, ShaderResourceView::DepthAsFloat(depthTexture));
+    m_CompositeShader->SetConstantBuffer(commandList, "NrdCompositeConstants", constants);
+    commandList.SetTexture(*m_CompositeShader, "DenoisedRadiance", ShaderResourceView(denoisedRadiance));
+    commandList.SetTexture(*m_CompositeShader, "DepthTexture", ShaderResourceView::DepthAsFloat(depthTexture));
+    commandList.SetTexture(*m_CompositeShader, "GBufferAlbedoOcclusion", ShaderResourceView(gBufferAlbedoOcclusion));
+    commandList.SetTexture(*m_CompositeShader, "GBufferEmissionMetallic", ShaderResourceView(gBufferEmissionMetallic));
     m_CompositeShader->SetUnorderedAccessView(commandList, "Output", UnorderedAccessView(output));
     m_CompositeShader->Bind(commandList);
     commandList.Dispatch((width + 7u) / 8u, (height + 7u) / 8u, 1u);
@@ -518,8 +540,10 @@ void NrdPass::Execute(
     RaytracingDemo& demo,
     CommandList& commandList,
     const std::shared_ptr<Texture>& noisyRadiance,
+    const std::shared_ptr<Texture>& gBufferAlbedoOcclusion,
     const std::shared_ptr<Texture>& gBufferSpecularSmoothness,
     const std::shared_ptr<Texture>& gBufferNormal,
+    const std::shared_ptr<Texture>& gBufferEmissionMetallic,
     const std::shared_ptr<Texture>& gBufferPosition,
     const std::shared_ptr<Texture>& depthTexture,
     const std::shared_ptr<Texture>& nrdNormalRoughness,
@@ -542,5 +566,5 @@ void NrdPass::Execute(
 
     PrepareInputs(demo, commandList, gBufferSpecularSmoothness, gBufferNormal, gBufferPosition, depthTexture, nrdNormalRoughness, nrdViewZ, nrdMotion, width, height);
     Denoise(demo, commandList, noisyRadiance, nrdNormalRoughness, nrdViewZ, nrdMotion, denoisedRadiance, width, height);
-    Composite(commandList, denoisedRadiance, depthTexture, output, width, height);
+    Composite(commandList, denoisedRadiance, depthTexture, gBufferAlbedoOcclusion, gBufferEmissionMetallic, output, width, height);
 }

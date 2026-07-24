@@ -1,9 +1,11 @@
 #include <ShaderLibrary/Common/RootSignature.hlsli>
+#include "../../../../External/NRD/Shaders/NRD.hlsli"
 
 cbuffer NrdPrepareConstants : register(b0)
 {
-    float4 CameraPosition;
-    float4 CameraForward;
+    row_major matrix WorldToView;
+    row_major matrix WorldToClip;
+    row_major matrix PreviousWorldToClip;
     uint Width;
     uint Height;
     uint Padding0;
@@ -24,11 +26,10 @@ float3 DecodeDemoNormal(float3 encoded)
     return normalize(encoded * 2.0f - 1.0f);
 }
 
-float4 PackNrdNormalRoughness(float3 normalWs, float roughness)
+float2 GetScreenUv(float4 clipPosition)
 {
-    normalWs = normalize(normalWs);
-    normalWs /= max(abs(normalWs.x), max(abs(normalWs.y), abs(normalWs.z)));
-    return float4(normalWs * 0.5f + 0.5f, saturate(roughness));
+    float2 ndc = clipPosition.xy / max(abs(clipPosition.w), 0.0001f);
+    return ndc * float2(0.5f, -0.5f) + 0.5f;
 }
 
 [numthreads(8, 8, 1)]
@@ -43,7 +44,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
     float depth = DepthTexture.Load(int3(pixel, 0));
     if (depth >= 1.0f)
     {
-        NrdNormalRoughness[pixel] = PackNrdNormalRoughness(float3(0.0f, 0.0f, 1.0f), 1.0f);
+        NrdNormalRoughness[pixel] = NRD_FrontEnd_PackNormalAndRoughness(float3(0.0f, 0.0f, 1.0f), 1.0f, 0.0f);
         NrdViewZ[pixel] = 1000000.0f;
         NrdMotion[pixel] = 0.0f;
         return;
@@ -55,9 +56,11 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     float3 normalWs = DecodeDemoNormal(normalSample.xyz);
     float roughness = 1.0f - saturate(specularSmoothness.a);
-    float viewZ = max(0.001f, dot(position.xyz - CameraPosition.xyz, normalize(CameraForward.xyz)));
+    float viewZ = mul(float4(position.xyz, 1.0f), WorldToView).z;
+    float2 currentUv = GetScreenUv(mul(float4(position.xyz, 1.0f), WorldToClip));
+    float2 previousUv = GetScreenUv(mul(float4(position.xyz, 1.0f), PreviousWorldToClip));
 
-    NrdNormalRoughness[pixel] = PackNrdNormalRoughness(normalWs, roughness);
+    NrdNormalRoughness[pixel] = NRD_FrontEnd_PackNormalAndRoughness(normalWs, roughness, 0.0f);
     NrdViewZ[pixel] = viewZ;
-    NrdMotion[pixel] = 0.0f;
+    NrdMotion[pixel] = previousUv - currentUv;
 }

@@ -1,4 +1,4 @@
-﻿// ReSharper disable CppRedundantQualifier
+// ReSharper disable CppRedundantQualifier
 #pragma once
 
 /*
@@ -43,6 +43,7 @@
 #include <map> // for std::map
 #include <memory> // for std::unique_ptr
 #include <mutex> // for std::mutex
+#include <string>
 #include <vector> // for std::vector
 
 #include "GenerateMipsPso.h"
@@ -426,6 +427,36 @@ public:
         UINT numSubresources = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
         const D3D12_SHADER_RESOURCE_VIEW_DESC* srv = nullptr
     );
+
+    template <typename ShaderLike, typename TextureLike>
+    void SetTexture(ShaderLike& shader, const std::string& variableName, const TextureLike& texture)
+    {
+        shader.SetTexture(*this, variableName, texture);
+    }
+
+    template <typename ShaderLike, typename TextureLike>
+    void SetTexture(std::shared_ptr<ShaderLike>& shader, const std::string& variableName, const TextureLike& texture)
+    {
+        shader->SetTexture(*this, variableName, texture);
+    }
+
+    template <typename ShaderLike, typename TextureLike>
+    void SetTexture(const std::shared_ptr<ShaderLike>& shader, const std::string& variableName, const TextureLike& texture)
+    {
+        shader->SetTexture(*this, variableName, texture);
+    }
+
+    template <typename ShaderLike, typename TextureLike>
+    void SetTexture(std::unique_ptr<ShaderLike>& shader, const std::string& variableName, const TextureLike& texture)
+    {
+        shader->SetTexture(*this, variableName, texture);
+    }
+
+    template <typename ShaderLike, typename TextureLike>
+    void SetTexture(const std::unique_ptr<ShaderLike>& shader, const std::string& variableName, const TextureLike& texture)
+    {
+        shader->SetTexture(*this, variableName, texture);
+    }
 //Modify End
 
     /**

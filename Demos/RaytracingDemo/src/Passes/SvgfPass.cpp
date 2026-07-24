@@ -75,13 +75,13 @@ void SvgfPass::Temporal(
     constants.PhiDepth = m_Settings.PhiDepth;
 
     m_RootSignature->Bind(commandList);
-    m_RootSignature->SetComputeConstantBuffer(commandList, constants);
-    m_RootSignature->SetComputeShaderResourceView(commandList, 0, ShaderResourceView(noisyRadiance));
-    m_RootSignature->SetComputeShaderResourceView(commandList, 1, ShaderResourceView(gBufferNormal));
-    m_RootSignature->SetComputeShaderResourceView(commandList, 2, ShaderResourceView(gBufferPosition));
-    m_RootSignature->SetComputeShaderResourceView(commandList, 3, ShaderResourceView::DepthAsFloat(depthTexture));
-    m_RootSignature->SetComputeShaderResourceView(commandList, 4, ShaderResourceView(m_HistoryColor[previousIndex]));
-    m_RootSignature->SetComputeShaderResourceView(commandList, 5, ShaderResourceView(m_HistoryMoments[previousIndex]));
+    m_TemporalShader->SetConstantBuffer(commandList, "SvgfTemporalConstants", constants);
+    commandList.SetTexture(*m_TemporalShader, "NoisyRadiance", ShaderResourceView(noisyRadiance));
+    commandList.SetTexture(*m_TemporalShader, "GBufferNormal", ShaderResourceView(gBufferNormal));
+    commandList.SetTexture(*m_TemporalShader, "GBufferPosition", ShaderResourceView(gBufferPosition));
+    commandList.SetTexture(*m_TemporalShader, "DepthTexture", ShaderResourceView::DepthAsFloat(depthTexture));
+    commandList.SetTexture(*m_TemporalShader, "HistoryColor", ShaderResourceView(m_HistoryColor[previousIndex]));
+    commandList.SetTexture(*m_TemporalShader, "HistoryMoments", ShaderResourceView(m_HistoryMoments[previousIndex]));
     m_TemporalShader->SetUnorderedAccessView(commandList, "TemporalColor", UnorderedAccessView(m_TemporalColor));
     m_TemporalShader->SetUnorderedAccessView(commandList, "TemporalMoments", UnorderedAccessView(m_TemporalMoments));
     m_TemporalShader->SetUnorderedAccessView(commandList, "Variance", UnorderedAccessView(m_Variance));
@@ -119,12 +119,12 @@ std::shared_ptr<Texture> SvgfPass::Atrous(
         output = (iteration % 2u) == 0u ? m_AtrousPing : m_AtrousPong;
 
         m_RootSignature->Bind(commandList);
-        m_RootSignature->SetComputeConstantBuffer(commandList, constants);
-        m_RootSignature->SetComputeShaderResourceView(commandList, 0, ShaderResourceView(input));
-        m_RootSignature->SetComputeShaderResourceView(commandList, 1, ShaderResourceView(m_Variance));
-        m_RootSignature->SetComputeShaderResourceView(commandList, 2, ShaderResourceView(gBufferNormal));
-        m_RootSignature->SetComputeShaderResourceView(commandList, 3, ShaderResourceView(gBufferPosition));
-        m_RootSignature->SetComputeShaderResourceView(commandList, 4, ShaderResourceView::DepthAsFloat(depthTexture));
+        m_AtrousShader->SetConstantBuffer(commandList, "SvgfAtrousConstants", constants);
+        commandList.SetTexture(*m_AtrousShader, "InputColor", ShaderResourceView(input));
+        commandList.SetTexture(*m_AtrousShader, "Variance", ShaderResourceView(m_Variance));
+        commandList.SetTexture(*m_AtrousShader, "GBufferNormal", ShaderResourceView(gBufferNormal));
+        commandList.SetTexture(*m_AtrousShader, "GBufferPosition", ShaderResourceView(gBufferPosition));
+        commandList.SetTexture(*m_AtrousShader, "DepthTexture", ShaderResourceView::DepthAsFloat(depthTexture));
         m_AtrousShader->SetUnorderedAccessView(commandList, "OutputColor", UnorderedAccessView(output));
         m_AtrousShader->Bind(commandList);
         commandList.Dispatch((width + 7u) / 8u, (height + 7u) / 8u, 1u);
@@ -138,6 +138,8 @@ std::shared_ptr<Texture> SvgfPass::Atrous(
 void SvgfPass::Composite(
     CommandList& commandList,
     const std::shared_ptr<Texture>& input,
+    const std::shared_ptr<Texture>& gBufferAlbedoOcclusion,
+    const std::shared_ptr<Texture>& gBufferEmissionMetallic,
     const std::shared_ptr<Texture>& depthTexture,
     const std::shared_ptr<Texture>& output,
     const uint32_t width,
@@ -148,9 +150,11 @@ void SvgfPass::Composite(
     constants.Height = height;
 
     m_RootSignature->Bind(commandList);
-    m_RootSignature->SetComputeConstantBuffer(commandList, constants);
-    m_RootSignature->SetComputeShaderResourceView(commandList, 0, ShaderResourceView(input));
-    m_RootSignature->SetComputeShaderResourceView(commandList, 1, ShaderResourceView::DepthAsFloat(depthTexture));
+    m_CompositeShader->SetConstantBuffer(commandList, "SvgfCompositeConstants", constants);
+    commandList.SetTexture(*m_CompositeShader, "FilteredColor", ShaderResourceView(input));
+    commandList.SetTexture(*m_CompositeShader, "DepthTexture", ShaderResourceView::DepthAsFloat(depthTexture));
+    commandList.SetTexture(*m_CompositeShader, "GBufferAlbedoOcclusion", ShaderResourceView(gBufferAlbedoOcclusion));
+    commandList.SetTexture(*m_CompositeShader, "GBufferEmissionMetallic", ShaderResourceView(gBufferEmissionMetallic));
     m_CompositeShader->SetUnorderedAccessView(commandList, "Output", UnorderedAccessView(output));
     m_CompositeShader->Bind(commandList);
     commandList.Dispatch((width + 7u) / 8u, (height + 7u) / 8u, 1u);
@@ -161,6 +165,8 @@ void SvgfPass::Execute(
     const std::shared_ptr<Texture>& noisyRadiance,
     const std::shared_ptr<Texture>& gBufferNormal,
     const std::shared_ptr<Texture>& gBufferPosition,
+    const std::shared_ptr<Texture>& gBufferAlbedoOcclusion,
+    const std::shared_ptr<Texture>& gBufferEmissionMetallic,
     const std::shared_ptr<Texture>& depthTexture,
     const std::shared_ptr<Texture>& output,
     const uint32_t width,
@@ -173,5 +179,5 @@ void SvgfPass::Execute(
 
     Temporal(commandList, noisyRadiance, gBufferNormal, gBufferPosition, depthTexture, width, height);
     const std::shared_ptr<Texture> filtered = Atrous(commandList, gBufferNormal, gBufferPosition, depthTexture, width, height);
-    Composite(commandList, filtered, depthTexture, output, width, height);
+    Composite(commandList, filtered, gBufferAlbedoOcclusion, gBufferEmissionMetallic, depthTexture, output, width, height);
 }
